@@ -1,0 +1,31 @@
+{
+  "name": "@causal/sdk",
+  "version": "0.1.0",
+  "description": "Causal SDK — automatic provenance capture for TypeScript AI agent projects",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@causal/types": "workspace:*",
+    "uuidv7": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.3"
+  },
+  "peerDependencies": {
+    "zod": "^3.0.0"
+  }
+}

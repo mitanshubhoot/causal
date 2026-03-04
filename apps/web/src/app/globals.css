@@ -1,0 +1,360 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* React Flow base styles */
+@import "reactflow/dist/style.css";
+
+@layer base {
+  :root {
+    --background: 0 0 0;
+    --foreground: 255 255 255;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background: #000000;
+    color: #ffffff;
+  }
+}
+
+/* ─── x.ai Design System ─── */
+
+/* Gradient text — slow pan */
+.gradient-text {
+  background: linear-gradient(130deg, #ffffff 0%, #e2e8f0 25%, #cbd5e1 50%, #94a3b8 80%, #64748b 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradient-pan 6s linear infinite;
+}
+
+@keyframes gradient-pan {
+  0% {
+    background-position: 0% center;
+  }
+
+  100% {
+    background-position: 200% center;
+  }
+}
+
+/* Giant hero text glow */
+.hero-glow-text {
+  text-shadow:
+    0 0 80px rgba(255, 255, 255, 0.15),
+    0 0 160px rgba(255, 255, 255, 0.08),
+    0 0 320px rgba(255, 255, 255, 0.04);
+}
+
+/* Blackhole accretion disk rotation */
+@keyframes accretion-spin {
+  0% {
+    transform: rotateX(75deg) rotateZ(0deg);
+  }
+
+  100% {
+    transform: rotateX(75deg) rotateZ(360deg);
+  }
+}
+
+/* Star twinkle */
+@keyframes star-twinkle {
+
+  0%,
+  100% {
+    opacity: 0.1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Photon ring pulse */
+@keyframes photon-pulse {
+
+  0%,
+  100% {
+    opacity: 0.5;
+    box-shadow: 0 0 40px rgba(255, 255, 255, 0.06), 0 0 80px rgba(255, 255, 255, 0.03);
+  }
+
+  50% {
+    opacity: 0.85;
+    box-shadow: 0 0 60px rgba(255, 255, 255, 0.12), 0 0 120px rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* Cosmic light flare behind hero */
+@keyframes cosmic-breathe {
+
+  0%,
+  100% {
+    opacity: 0.6;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  50% {
+    opacity: 0.8;
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+}
+
+/* Subtle float for ambient elements */
+@keyframes gentle-float {
+
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+/* Gargantua accretion disk glow */
+@keyframes disk-glow {
+
+  0%,
+  100% {
+    opacity: 0.7;
+    filter: blur(8px);
+  }
+
+  50% {
+    opacity: 1;
+    filter: blur(12px);
+  }
+}
+
+/* Gravitational lensing warp — the light bending over the top */
+@keyframes lensing-shimmer {
+
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: rotateX(75deg) scaleY(1);
+  }
+
+  50% {
+    opacity: 0.8;
+    transform: rotateX(75deg) scaleY(1.03);
+  }
+}
+
+/* Slow rotation for the main disk */
+@keyframes disk-rotate {
+  0% {
+    transform: rotateX(75deg) rotateZ(0deg);
+  }
+
+  100% {
+    transform: rotateX(75deg) rotateZ(360deg);
+  }
+}
+
+/* Causal DAG edge pulse */
+@keyframes edge-pulse {
+  0% {
+    stroke-dashoffset: 20;
+    opacity: 0.3;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.3;
+  }
+}
+
+/* Node glow on causal graph */
+@keyframes node-breathe {
+
+  0%,
+  100% {
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.1));
+  }
+
+  50% {
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.3));
+  }
+}
+
+/* Blackhole image slow drift — creates living 3D feel */
+@keyframes blackhole-drift {
+  0% {
+    transform: translate(-50%, -50%) scale(1) rotate(0deg);
+  }
+
+  33% {
+    transform: translate(-49%, -51%) scale(1.03) rotate(0.5deg);
+  }
+
+  66% {
+    transform: translate(-51%, -49%) scale(1.01) rotate(-0.3deg);
+  }
+
+  100% {
+    transform: translate(-50%, -50%) scale(1) rotate(0deg);
+  }
+}
+
+/* Causal graph node float animation */
+@keyframes node-float {
+
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+
+  25% {
+    transform: translate(2px, -3px);
+  }
+
+  50% {
+    transform: translate(-1px, 2px);
+  }
+
+  75% {
+    transform: translate(3px, 1px);
+  }
+}
+
+/* Scanning line animation for causal graph */
+@keyframes scan-sweep {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 0.6;
+  }
+
+  90% {
+    opacity: 0.6;
+  }
+
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+/* x.ai-style card hover */
+.xai-card {
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.xai-card:hover {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 24px 80px rgba(0, 0, 0, 0.6);
+}
+
+/* x.ai-style pill button */
+.xai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  padding: 10px 24px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: #ffffff;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.xai-btn:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.xai-btn-primary {
+  background: #ffffff;
+  color: #000000;
+  border-color: #ffffff;
+}
+
+.xai-btn-primary:hover {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.9);
+}
+
+/* Glow separator */
+.glow-sep {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04), transparent);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #222;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #333;
+}
+
+/* React Flow custom styles */
+.react-flow__node {
+  cursor: pointer;
+}
+
+.react-flow__edge-path {
+  stroke-width: 2;
+}
+
+.react-flow__controls button {
+  background: #1f2937;
+  border-color: #374151;
+  color: #e5e7eb;
+}
+
+.react-flow__controls button:hover {
+  background: #374151;
+}
+
+.react-flow__minimap {
+  background: #111827;
+}
+
+/* Confidence badge flash animation */
+@keyframes confidence-flash {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.confidence-assembling {
+  animation: confidence-flash 1.5s ease-in-out infinite;
+}
