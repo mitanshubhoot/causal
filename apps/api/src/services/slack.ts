@@ -63,6 +63,32 @@ export async function notifyIncidentTraced(
         text: `*Causal chain:* ${traceGraph.criticalPath.length} nodes traced across ${new Set(traceGraph.nodes.map((n) => n.layer)).size} layers`,
       },
     },
+    ...(traceGraph.rootCauses.length > 1
+      ? [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*Alternative root causes:*\n${traceGraph.rootCauses
+                .slice(1, 4)
+                .map((rc, i) => `${i + 2}. ${Math.round(rc.probability * 100)}% — ${rc.explanation ?? "No explanation"}`)
+                .join("\n")}`,
+            },
+          },
+        ]
+      : []),
+    {
+      type: "divider",
+    },
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: `Traced at <!date^${Math.floor(Date.now() / 1000)}^{date_short_pretty} {time}|${new Date().toISOString()}> · ${traceGraph.nodes.length} nodes · ${traceGraph.edges.length} edges`,
+        },
+      ],
+    },
     {
       type: "actions",
       elements: [
@@ -76,6 +102,11 @@ export async function notifyIncidentTraced(
           type: "button",
           text: { type: "plain_text", text: "Replay with Fix" },
           url: `${config.APP_URL}/incidents/${traceGraph.rootNodeId}/replay`,
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "Generate Postmortem" },
+          url: `${config.APP_URL}/incidents/${traceGraph.rootNodeId}/postmortem`,
         },
       ],
     },
