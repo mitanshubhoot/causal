@@ -24,25 +24,25 @@ export const LAYER_ORDER: Layer[] = [
 export const CausalNodeSchema = z.object({
   id: z.string().uuid(),
   layer: LayerSchema,
-  kind: z.string(),
+  kind: z.string().min(1).max(64),
   timestamp: z.number().int().positive(),   // Unix ms
-  agentId: z.string().nullable(),
-  modelVersion: z.string().nullable(),
-  sessionId: z.string().nullable(),
-  contextSnapId: z.string().nullable(),
+  agentId: z.string().max(128).nullable(),
+  modelVersion: z.string().max(64).nullable(),
+  sessionId: z.string().uuid().nullable(),
+  contextSnapId: z.string().uuid().nullable(),
   payload: z.record(z.unknown()),
   embedding: z.array(z.number()).length(1536).nullable(),
-  orgId: z.string(),
-  repoId: z.string(),
+  orgId: z.string().min(1).max(128),
+  repoId: z.string().max(128),
 });
 export type CausalNode = z.infer<typeof CausalNodeSchema>;
 
 // ── Layer-specific payload shapes ────────────────────────────────
 
 export const IntentPayloadSchema = z.object({
-  title: z.string(),
+  title: z.string().min(1).max(256),
   url: z.string().url().optional(),
-  freeformText: z.string(),
+  freeformText: z.string().max(10_000),
   source: z.enum(["notion", "slack", "manual"]).default("manual"),
 });
 export type IntentPayload = z.infer<typeof IntentPayloadSchema>;
