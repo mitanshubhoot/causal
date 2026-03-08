@@ -32,7 +32,12 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         return reply.code(401).send({ error: "Missing Authorization header" });
       }
 
-      const [scheme, token] = authHeader.split(" ");
+      // Split on the first space only to handle tokens that may contain spaces.
+      // Previously used authHeader.split(" ") which would truncate tokens with
+      // embedded spaces (e.g. Clerk session tokens on some platforms).
+      const spaceIdx = authHeader.indexOf(" ");
+      const scheme = spaceIdx === -1 ? authHeader : authHeader.slice(0, spaceIdx);
+      const token = spaceIdx === -1 ? undefined : authHeader.slice(spaceIdx + 1).trim() || undefined;
 
       if (scheme === "Bearer" && token) {
         // API key auth: hash the provided key and look it up
@@ -65,7 +70,11 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
-      return reply.code(401).send({ error: "Invalid authorization scheme" });
+      const supportedSchemes = ["Bearer"];
+      return reply.code(401).send({
+        error: "Invalid authorization scheme",
+        supported: supportedSchemes,
+      });
     }
   );
 };
