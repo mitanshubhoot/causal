@@ -5,7 +5,17 @@ import { embedText } from "../services/embeddings.js";
 import { config } from "../config.js";
 
 const tracePlugin: FastifyPluginAsync = async (fastify) => {
-  // POST /api/v1/trace — assemble a TraceGraph from a root node
+  /**
+   * POST /api/v1/trace
+   *
+   * Assembles a TraceGraph starting from the given root node ID.
+   * Walks the causal graph backwards using BFS up to `maxDepth` hops,
+   * filtering edges below `minWeight`. Returns the full graph including
+   * critical path, root cause rankings, and all contributing nodes.
+   *
+   * @body {TraceRequestSchema} rootNodeId, maxDepth?, minWeight?, includeContributed?
+   * @returns {TraceGraph}
+   */
   fastify.post("/", async (request, reply) => {
     const body = TraceRequestSchema.parse(request.body);
     const { orgId } = request.authUser;
@@ -19,7 +29,15 @@ const tracePlugin: FastifyPluginAsync = async (fastify) => {
     return traceGraph;
   });
 
-  // GET /api/v1/trace/:id — retrieve a cached TraceGraph
+  /**
+   * GET /api/v1/trace/:id
+   *
+   * Retrieves a previously assembled and cached TraceGraph by its ID.
+   * Only returns graphs belonging to the authenticated org.
+   *
+   * @param id - TraceGraph UUID
+   * @returns {TraceGraph} or 404 if not found
+   */
   fastify.get<{ Params: { id: string } }>("/:id", async (request, reply) => {
     const rows = await fastify.pg`
       SELECT * FROM trace_graphs
@@ -40,6 +58,13 @@ const tracePlugin: FastifyPluginAsync = async (fastify) => {
     };
   });
 
+  /**
+   * POST /api/v1/search
+   *
+   * Searches causal nodes using either vector similarity (when
+   * ENABLE_VECTOR_EMBEDDINGS is set and OPENAI_API_KEY is present)
+   * or falls back to Postgres full-text search via tsvector.
+   */
   // POST /api/v1/search — semantic/full-text node search
   fastify.post("/search", async (request, reply) => {
     const body = SearchRequestSchema.parse(request.body);
