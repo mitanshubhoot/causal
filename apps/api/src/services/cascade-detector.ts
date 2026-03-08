@@ -150,8 +150,12 @@ export function detectCascade(
         nodeMap
     );
 
-    // A cascade spans 3+ layers
-    const isCascading = primaryCascade.layersInvolved.length >= 3;
+    // A cascade spans 3+ distinct layers AND has meaningful probability.
+    // Previously only checked layer count, causing single-layer multi-hop
+    // paths to be incorrectly flagged as cascading failures.
+    const isCascading =
+        primaryCascade.layersInvolved.length >= 3 &&
+        primaryCascade.cascadeProbability >= 0.25;
 
     return {
         primaryCascade,
@@ -194,9 +198,12 @@ function findAllCascadePaths(
 
         const sources = incoming.get(current) ?? [];
 
-        // Filter to unvisited sources with reasonable weight
+        // Filter to unvisited sources above minimum confidence threshold.
+        // Previously used 0.1 which allowed near-zero-weight noise edges to
+        // create spurious cascade paths. Raised to 0.25 to match the global
+        // MIN_CONFIDENCE_THRESHOLD default and reduce false positives.
         const validSources = sources.filter(
-            (s) => !visited.has(s.sourceId) && s.edge.weight >= 0.1
+            (s) => !visited.has(s.sourceId) && s.edge.weight >= 0.25
         );
 
         if (validSources.length === 0 && path.length > 1) {
