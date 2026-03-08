@@ -62,6 +62,34 @@ const postmortemPlugin: FastifyPluginAsync = async (fastify) => {
     if (!rows.length) return reply.notFound();
     return rows[0];
   });
+
+  // GET /api/v1/postmortem/:id/export?format=markdown|json
+  fastify.get<{
+    Params: { id: string };
+    Querystring: { format?: "markdown" | "json" };
+  }>("/:id/export", async (request, reply) => {
+    const { id } = request.params;
+    const format = request.query.format ?? "markdown";
+    const { orgId } = request.authUser;
+
+    const rows = await fastify.pg`
+      SELECT * FROM post_mortems WHERE id = ${id} AND org_id = ${orgId}
+    ` as Array<Record<string, unknown>>;
+
+    if (!rows.length) return reply.notFound();
+    const pm = rows[0]!;
+
+    if (format === "json") {
+      reply.header("Content-Disposition", `attachment; filename="postmortem-${id}.json"`);
+      reply.header("Content-Type", "application/json");
+      return reply.send(JSON.stringify(pm, null, 2));
+    }
+
+    const markdown = pm["markdown"] as string;
+    reply.header("Content-Disposition", `attachment; filename="postmortem-${id}.md"`);
+    reply.header("Content-Type", "text/markdown; charset=utf-8");
+    return reply.send(markdown);
+  });
 };
 
 // ── Generate post-mortem Markdown via Claude ──────────────────────
