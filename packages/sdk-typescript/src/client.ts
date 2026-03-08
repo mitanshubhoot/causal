@@ -1,11 +1,20 @@
 import type { CausalNode, CausalEdge, CreateNode, CreateEdge, TraceGraph, ContextSnapshot } from "@causal/types";
 
+export interface RetryOptions {
+  maxRetries?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  backoffFactor?: number;
+  retryOn?: number[];
+}
+
 export interface CausalClientOptions {
   apiKey?: string;
   baseUrl?: string;
   orgId?: string;
   repoId?: string;
   timeout?: number;
+  retry?: RetryOptions;
 }
 
 export class CausalClient {
@@ -14,6 +23,7 @@ export class CausalClient {
   readonly orgId: string;
   readonly repoId: string;
   private readonly timeout: number;
+  private readonly retry: Required<RetryOptions>;
 
   constructor(options: CausalClientOptions = {}) {
     this.apiKey = options.apiKey ?? process.env["CAUSAL_API_KEY"] ?? "";
@@ -21,32 +31,66 @@ export class CausalClient {
     this.orgId = options.orgId ?? process.env["CAUSAL_ORG_ID"] ?? "default";
     this.repoId = options.repoId ?? process.env["CAUSAL_REPO_ID"] ?? "";
     this.timeout = options.timeout ?? 10000;
+    this.retry = {
+      maxRetries: options.retry?.maxRetries ?? 3,
+      initialDelayMs: options.retry?.initialDelayMs ?? 300,
+      maxDelayMs: options.retry?.maxDelayMs ?? 5000,
+      backoffFactor: options.retry?.backoffFactor ?? 2,
+      retryOn: options.retry?.retryOn ?? [429, 502, 503, 504],
+    };
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeout);
+    const { maxRetries, initialDelayMs, maxDelayMs, backoffFactor, retryOn } = this.retry;
+    let attempt = 0;
+    let delay = initialDelayMs;
 
-    try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
-        ...init,
-        signal: controller.signal,
-        headers: {
-          "Authorization": `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
-          "User-Agent": "@causal/sdk/0.1.0",
-          ...(init.headers ?? {}),
-        },
-      });
+    while (true) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeout);
 
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        throw new Error(`Causal API error ${response.status}: ${text}`);
+      try {
+        const response = await fetch(`${this.baseUrl}${path}`, {
+          ...init,
+          signal: controller.signal,
+          headers: {
+            "Authorization": `Bearer ${this.apiKey}`,
+            "Content-Type": "application/json",
+            "User-Agent": "@causal/sdk/0.1.0",
+            ...(init.headers ?? {}),
+          },
+        });
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => "");
+          if (retryOn.includes(response.status) && attempt < maxRetries) {
+            attempt++;
+            await this.sleep(Math.min(delay, maxDelayMs));
+            delay = Math.min(delay * backoffFactor, maxDelayMs);
+            continue;
+          }
+          throw new Error(`Causal API error ${response.status}: ${text}`);
+        }
+
+        return response.json() as Promise<T>;
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          if (attempt < maxRetries) {
+            attempt++;
+            await this.sleep(Math.min(delay, maxDelayMs));
+            delay = Math.min(delay * backoffFactor, maxDelayMs);
+            continue;
+          }
+          throw new Error(`Causal API request timed out after ${this.timeout}ms`);
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
       }
-
-      return response.json() as Promise<T>;
-    } finally {
-      clearTimeout(timer);
     }
   }
 
