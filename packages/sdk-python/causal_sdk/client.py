@@ -1,9 +1,14 @@
 """
 Causal SDK HTTP client — sends nodes, edges, and snapshots to the Causal API.
+
+Provides both async (AsyncCausalClient) and sync (CausalClient) interfaces.
+The async client is the primary implementation; the sync client wraps it using
+asyncio.run() for use in non-async contexts.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any
@@ -13,7 +18,47 @@ import httpx
 from .models import CausalNode, CausalEdge, CreateNode, CreateEdge
 
 
-class CausalClient:
+class AsyncCausalClient:
+    """Async-native Causal API client. Prefer this in async codebases."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        org_id: str | None = None,
+        repo_id: str | None = None,
+        timeout: float = 10.0,
+    ):
+        self.api_key = api_key or os.environ.get("CAUSAL_API_KEY", "")
+        self.base_url = (base_url or os.environ.get("CAUSAL_API_URL", "http://localhost:3001")).rstrip("/")
+        self.org_id = org_id or os.environ.get("CAUSAL_ORG_ID", "default")
+        self.repo_id = repo_id or os.environ.get("CAUSAL_REPO_ID", "")
+        self._client = httpx.AsyncClient(
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "causal-sdk-python/0.1.0",
+            },
+            timeout=timeout,
+        )
+
+    async def __aenter__(self) -> "AsyncCausalClient":
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+
+class CausalClient(AsyncCausalClient):
+    """Backwards-compatible sync wrapper around AsyncCausalClient.
+
+    Uses asyncio.run() internally — do not use inside an already-running
+    event loop. In async contexts, use AsyncCausalClient directly.
+    """
+
     def __init__(
         self,
         api_key: str | None = None,
