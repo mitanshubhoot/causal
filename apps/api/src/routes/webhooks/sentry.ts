@@ -6,6 +6,29 @@ import { assembleTraceGraph } from "../../services/tracegraph.js";
 import { notifyIncidentTraced } from "../../services/slack.js";
 import { config } from "../../config.js";
 
+/**
+ * Sentry Webhook Handler
+ *
+ * Receives Sentry issue alerts and automatically creates INCIDENT nodes
+ * with stack trace parsing for auto-linking to CODE nodes.
+ *
+ * **Webhook payload shape:**
+ * - action: "created" | "resolved" | "assigned" | ...
+ * - data.issue: { id, title, culprit, permalink, level, metadata, ... }
+ * - data.issue.metadata.value: exception message or stack trace
+ *
+ * **Processing flow:**
+ * 1. HMAC signature verification (if SENTRY_WEBHOOK_SECRET is set)
+ * 2. Skip non-"created" actions (resolved/commented are ignored)
+ * 3. Create INCIDENT node with exception + stack trace in payload
+ * 4. Parse stack trace and run auto-link pipeline (strategy 3: stack_trace)
+ * 5. Assemble TraceGraph backwards from INCIDENT → EXECUTION → CODE → REASONING
+ * 6. Notify Slack channel if configured
+ *
+ * **Node types created:**
+ * - INCIDENT: always created for new Sentry issues
+ * - Edges: auto-linked via stack trace → git blame (confidence 0.85-0.95)
+ */
 const sentryWebhookPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.post("/sentry", {
     config: { rawBody: true },
