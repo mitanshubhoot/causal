@@ -130,6 +130,39 @@ class CausalSession:
         if spec_id not in self.spec_ids:
             self.spec_ids.append(spec_id)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize session state to a dict for persistence or resumption."""
+        return {
+            "session_id": self.session_id,
+            "org_id": self.org_id,
+            "repo_id": self.repo_id,
+            "model_id": self.model_id,
+            "agent_id": self.agent_id,
+            "started_at": self.started_at,
+            "snapshot_ids": self.snapshot_ids[:],
+            "tools_called": self.tools_called[:],
+            "files_modified": self.files_modified[:],
+            "spec_ids": self.spec_ids[:],
+            "node_id": self._node_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CausalSession":
+        """Restore a session from a serialized dict."""
+        session = cls.__new__(cls)
+        session.session_id = data["session_id"]
+        session.org_id = data["org_id"]
+        session.repo_id = data["repo_id"]
+        session.model_id = data.get("model_id", "unknown")
+        session.agent_id = data.get("agent_id")
+        session.started_at = data["started_at"]
+        session.snapshot_ids = data.get("snapshot_ids", [])
+        session.tools_called = data.get("tools_called", [])
+        session.files_modified = data.get("files_modified", [])
+        session.spec_ids = data.get("spec_ids", [])
+        session._node_id = data.get("node_id")
+        return session
+
 
 def _get_git_head() -> str:
     try:
