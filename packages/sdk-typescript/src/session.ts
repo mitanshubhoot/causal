@@ -6,6 +6,20 @@ import type { CreateNode, ContextSnapshot } from "@causal/types";
 
 const SESSION_FILE = ".causal-session";
 
+export interface SessionSummary {
+  sessionId: string;
+  orgId: string;
+  repoId: string;
+  modelId: string;
+  agentId: string | null;
+  startedAt: number;
+  nodeId: string | null;
+  snapshotCount: number;
+  toolsCalledCount: number;
+  filesModifiedCount: number;
+  specIds: string[];
+}
+
 export class CausalSession {
   readonly sessionId: string;
   readonly startedAt: number;
@@ -86,6 +100,22 @@ export class CausalSession {
   declareSpec(specId: string): void {
     if (!this.specIds.includes(specId)) this.specIds.push(specId);
   }
+
+  toSummary(): SessionSummary {
+    return {
+      sessionId: this.sessionId,
+      orgId: this.orgId,
+      repoId: this.repoId,
+      modelId: this.modelId,
+      agentId: this.agentId,
+      startedAt: this.startedAt,
+      nodeId: this.nodeId,
+      snapshotCount: this.snapshotIds.length,
+      toolsCalledCount: this.toolsCalled.length,
+      filesModifiedCount: this.filesModified.length,
+      specIds: this.specIds.slice(),
+    };
+  }
 }
 
 export function readSessionFile(path = SESSION_FILE): string | null {
@@ -104,7 +134,7 @@ export function clearSessionFile(path = SESSION_FILE): void {
   }
 }
 
-function getGitHead(): string {
+export function getGitHead(): string {
   try {
     return execSync("git rev-parse HEAD", { stdio: ["pipe", "pipe", "pipe"] })
       .toString()
