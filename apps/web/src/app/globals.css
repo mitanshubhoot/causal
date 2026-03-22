@@ -300,6 +300,66 @@
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04), transparent);
 }
 
+/* ─── Cinematic scroll-driven additions ─── */
+
+/* Horizontal ticker / marquee */
+@keyframes ticker {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.ticker-track { animation: ticker 30s linear infinite; }
+.ticker-track:hover { animation-play-state: paused; }
+
+/* Scroll progress bar */
+.scroll-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.3);
+  transform-origin: left;
+  z-index: 100;
+  pointer-events: none;
+}
+
+/* Benefit section oversized number */
+.benefit-number {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: clamp(160px, 20vw, 320px);
+  font-weight: 100;
+  color: rgba(255, 255, 255, 0.04);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Reveal clip — text slides up from behind a clip mask */
+.reveal-clip {
+  overflow: hidden;
+}
+
+/* Stats counter number */
+.stat-number {
+  font-size: clamp(56px, 8vw, 96px);
+  font-weight: 200;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: #ffffff;
+}
+
+/* Glow line separator */
+.glow-line {
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255,255,255,0.08) 20%,
+    rgba(255,255,255,0.15) 50%,
+    rgba(255,255,255,0.08) 80%,
+    transparent 100%
+  );
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
