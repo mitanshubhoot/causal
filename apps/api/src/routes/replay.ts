@@ -200,7 +200,8 @@ function computeFidelityScore(
   const warningLevel =
     overallScore >= 0.7 ? "none" :
     overallScore >= 0.4 ? "low" :
-    overallScore >= 0.0 ? "high" : "disabled";
+    overallScore >= 0.3 ? "high" :
+    "critical";
 
   return {
     snapshotId: snapshot.snapshotId,
