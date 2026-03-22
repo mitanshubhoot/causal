@@ -63,7 +63,7 @@ export async function buildApp() {
     // Neo4j
     try {
       const neo4jStart = Date.now();
-      await app.neo4j.verifyConnectivity();
+      await app.neo4j.run("RETURN 1");
       services.neo4j = { status: "connected", latencyMs: Date.now() - neo4jStart };
     } catch {
       services.neo4j = { status: "disconnected" };
