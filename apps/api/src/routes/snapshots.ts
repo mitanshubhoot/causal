@@ -1,8 +1,38 @@
 import { uuidv7 } from "uuidv7";
 import type { FastifyPluginAsync } from "fastify";
 import { ContextSnapshotSchema } from "@causal/types";
+import { z } from "zod";
 
 const snapshotsPlugin: FastifyPluginAsync = async (fastify) => {
+  // GET /api/v1/snapshots?nodeId=<id> — list snapshots for a node
+  fastify.get<{ Querystring: { nodeId: string } }>("/", async (request, reply) => {
+    const { nodeId } = z.object({ nodeId: z.string().uuid() }).parse(request.query);
+    const { orgId } = request.authUser;
+
+    const rows = await fastify.pg`
+      SELECT 
+        snapshot_id, node_id, s3_key, content_hash, model_id,
+        token_count, decision_type, timestamp
+      FROM snapshot_meta
+      WHERE node_id = ${nodeId} AND org_id = ${orgId}
+      ORDER BY timestamp DESC
+      LIMIT 50
+    ` as Array<Record<string, unknown>>;
+
+    const snapshots = rows.map((r) => ({
+      snapshotId: r["snapshot_id"],
+      nodeId: r["node_id"],
+      s3Key: r["s3_key"],
+      contentHash: r["content_hash"],
+      modelId: r["model_id"],
+      tokenCount: r["token_count"],
+      decisionType: r["decision_type"],
+      timestamp: Number(r["timestamp"]),
+    }));
+
+    return { snapshots, count: snapshots.length };
+  });
+
   // POST /api/v1/snapshots — upload a context snapshot
   fastify.post("/", async (request, reply) => {
     const { orgId } = request.authUser;
