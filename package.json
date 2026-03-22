@@ -4,6 +4,7 @@
   "private": true,
   "packageManager": "pnpm@10.6.5",
   "scripts": {
+    "postinstall": "pnpm --filter @causal/types run build",
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",
