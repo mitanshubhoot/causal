@@ -18,13 +18,34 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import type { CausalNode, CausalEdge } from "@causal/types";
+import type { CausalNode, CausalEdge, LinkStrategy } from "@causal/types";
+import { STRATEGY_CONFIDENCE } from "@causal/types";
 import { createEdge } from "./edges.js";
 import { config } from "../config.js";
 
 export interface AutoLinkResult {
   edgesCreated: CausalEdge[];
   strategiesRan: string[];
+}
+
+/**
+ * Clamp confidence score to the valid range for the given strategy.
+ * Logs a warning if the score falls outside expected bounds.
+ */
+function clampConfidence(strategy: LinkStrategy, score: number): number {
+  const bounds = STRATEGY_CONFIDENCE[strategy];
+  if (!bounds) {
+    console.warn(`Unknown link strategy: ${strategy}, using score as-is`);
+    return Math.max(0, Math.min(1, score));
+  }
+
+  if (score < bounds.min || score > bounds.max) {
+    console.warn(
+      `Confidence ${score.toFixed(3)} for strategy "${strategy}" outside expected range [${bounds.min}, ${bounds.max}], clamping`
+    );
+  }
+
+  return Math.max(bounds.min, Math.min(bounds.max, score));
 }
 
 // ── Entry point called after any INCIDENT or CODE node is created ─
@@ -119,7 +140,7 @@ async function strategy1_sessionId(
   );
 
   return rows.map((row) =>
-    neo4jRelToCausalEdge(row.r, "REASONING_ID", codeNode.id, "PRODUCED", "session_id", codeNode.orgId, 0.97)
+    neo4jRelToCausalEdge(row.r, "REASONING_ID", codeNode.id, "PRODUCED", "session_id", codeNode.orgId, clampConfidence("session_id", 0.97))
   );
 }
 
@@ -162,7 +183,7 @@ async function strategy2_timeWindow(
     const confidence = 0.4 * temporalScore + 0.6 * overlapScore;
     if (confidence < 0.4) continue;
 
-    const clampedConfidence = Math.min(0.8, Math.max(0.5, confidence));
+    const clampedConfidence = clampConfidence("time_window", confidence);
     const isSuggested = clampedConfidence < config.MIN_CONFIDENCE_THRESHOLD;
 
     const edge = await createEdge(fastify, {
@@ -215,7 +236,7 @@ export async function strategy3_stackTrace(
     for (const row of codeNodes) {
       const codeNodeId = row.n["id"] as string;
       const hasLineMatch = frame.lineno !== undefined;
-      const confidence = hasLineMatch ? 0.92 : 0.85;
+      const confidence = clampConfidence("stack_trace", hasLineMatch ? 0.92 : 0.85);
 
       const edge = await createEdge(fastify, {
         sourceId: codeNodeId,
@@ -261,11 +282,13 @@ async function strategy4_vectorSimilarity(
   for (const result of similar) {
     if (result.similarity < 0.5) continue;
 
+    const confidence = clampConfidence("vector", Math.min(0.6, result.similarity * 0.7));
+
     const edge = await createEdge(fastify, {
       sourceId: result.id,
       targetId: incidentNode.id,
       type: result.layer === "SPEC" ? "SPECIFIED_BY" : "CONTRIBUTED_TO",
-      weight: Math.min(0.6, result.similarity * 0.7),
+      weight: confidence,
       linkStrategy: "vector",
       confirmedBy: null,
       isSuggested: true,
