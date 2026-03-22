@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: causal-web
+    env: node
+    region: oregon
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @causal/web run build
+    startCommand: pnpm --filter @causal/web run start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NEXT_PUBLIC_API_URL
+        value: ""
