@@ -22,8 +22,17 @@ export async function assembleTraceGraph(
     includeContributed?: boolean;
   } = {}
 ): Promise<TraceGraph> {
-  const { maxDepth = 6, minWeight = 0.3 } = options;
+  let { maxDepth = 6, minWeight = 0.3 } = options;
   const traceId = uuidv7();
+
+  // Clamp minWeight to valid range [0.1, 0.99] to prevent degenerate graphs
+  if (minWeight < 0.1 || minWeight > 0.99) {
+    fastify.log.warn(
+      { minWeight, clamped: Math.max(0.1, Math.min(0.99, minWeight)) },
+      "minWeight out of range [0.1, 0.99], clamping"
+    );
+    minWeight = Math.max(0.1, Math.min(0.99, minWeight));
+  }
 
   // ── 1. Fetch all ancestors from Neo4j ────────────────────────────
   const { nodes, edges } = await fetchAncestorGraph(
