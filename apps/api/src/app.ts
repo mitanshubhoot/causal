@@ -56,14 +56,45 @@ export async function buildApp() {
     timestamp: Date.now(),
   }));
 
-  app.get("/api/v1/health", async () => ({
-    status: "ok",
-    services: {
-      neo4j: "connected",
-      postgres: "connected",
-      redis: "connected",
-    },
-  }));
+  app.get("/api/v1/health", async () => {
+    const start = Date.now();
+    const services: Record<string, { status: string; latencyMs?: number }> = {};
+
+    // Neo4j
+    try {
+      const neo4jStart = Date.now();
+      await app.neo4j.verifyConnectivity();
+      services.neo4j = { status: "connected", latencyMs: Date.now() - neo4jStart };
+    } catch {
+      services.neo4j = { status: "disconnected" };
+    }
+
+    // Postgres
+    try {
+      const pgStart = Date.now();
+      await app.pg`SELECT 1`;
+      services.postgres = { status: "connected", latencyMs: Date.now() - pgStart };
+    } catch {
+      services.postgres = { status: "disconnected" };
+    }
+
+    // Redis
+    try {
+      const redisStart = Date.now();
+      await app.redis.ping();
+      services.redis = { status: "connected", latencyMs: Date.now() - redisStart };
+    } catch {
+      services.redis = { status: "disconnected" };
+    }
+
+    const allHealthy = Object.values(services).every((s) => s.status === "connected");
+
+    return {
+      status: allHealthy ? "ok" : "degraded",
+      services,
+      totalLatencyMs: Date.now() - start,
+    };
+  });
 
   // ── API routes ──────────────────────────────────────────────────
   await app.register(nodesPlugin,     { prefix: "/api/v1/nodes" });
