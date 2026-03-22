@@ -1,9 +1,27 @@
+import { createHmac, timingSafeEqual } from "crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { createNode } from "../../services/nodes.js";
 import { runAutoLinkPipeline } from "../../services/autolink.js";
+import { config } from "../../config.js";
 
 const datadogWebhookPlugin: FastifyPluginAsync = async (fastify) => {
-  fastify.post("/datadog", async (request, reply) => {
+  fastify.post("/datadog", {
+    config: { rawBody: true },
+  }, async (request, reply) => {
+    // Verify Datadog webhook signature if configured
+    const datadogSecret = process.env["DATADOG_WEBHOOK_SECRET"];
+    if (datadogSecret) {
+      const signature = request.headers["x-datadog-signature"] as string;
+      const rawBody = (request as unknown as { rawBody: Buffer }).rawBody;
+      const expected = createHmac("sha256", datadogSecret)
+        .update(rawBody)
+        .digest("hex");
+
+      if (!signature || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+        return reply.code(401).send({ error: "Invalid Datadog signature" });
+      }
+    }
+
     const body = request.body as Record<string, unknown>;
 
     // Datadog monitor alert payload
@@ -20,7 +38,8 @@ const datadogWebhookPlugin: FastifyPluginAsync = async (fastify) => {
       return reply.code(200).send({ ok: true, skipped: true });
     }
 
-    const orgId = "default"; // TODO: resolve from Datadog team config
+    // Resolve orgId from X-Causal-Org-Id header, fallback to "default"
+    const orgId = (request.headers["x-causal-org-id"] as string) || "default";
 
     const executionNode = await createNode(fastify, {
       layer: "EXECUTION",
