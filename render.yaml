@@ -3,7 +3,7 @@ services:
     name: causal-web
     env: node
     region: oregon
-    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @causal/web run build
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @causal/types run build && pnpm --filter @causal/web run build
     startCommand: pnpm --filter @causal/web run start
     healthCheckPath: /
     envVars:
