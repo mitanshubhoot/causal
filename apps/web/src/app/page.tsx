@@ -377,92 +377,140 @@ function InterstellarBlackhole() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HERO — staggered line-by-line reveal
+// HERO — terminal-industries.com style: text AS the visual
 // ─────────────────────────────────────────────────────────────────────────────
 
+const heroLineVariant = {
+  hidden: { opacity: 0, y: 48 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 1.1, ease: EASE_OUT },
+  },
+};
+
+const heroLines = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.18, delayChildren: 0.3 } },
+};
+
+const capabilityVariant = {
+  hidden: { opacity: 0, y: 16 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.7, ease: EASE_OUT },
+  },
+};
+
+const capabilities = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.08, delayChildren: 1.2 } },
+};
+
 function HeroSection() {
+  const items = [
+    "Automatic causal graph from every agent execution",
+    "LLM-powered root cause traversal, backwards from failure",
+    "Counterfactual scoring at every inference step",
+    "Webhook ingestion from Sentry, Datadog, PagerDuty",
+    "AI-generated postmortems in one click",
+    "Replay any incident with modified prompt or context",
+  ];
+
   return (
-    <section className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden">
+    <section className="relative min-h-screen overflow-hidden flex flex-col">
+      {/* Blackhole — full section background */}
       <InterstellarBlackhole />
 
-      {/* Ghost wordmark */}
-      <div
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[55%] pointer-events-none select-none hero-glow-text"
-        style={{
-          fontSize: "clamp(120px, 18vw, 260px)",
-          fontWeight: 200,
-          letterSpacing: "-0.03em",
-          color: "rgba(255,255,255,0.07)",
-          whiteSpace: "nowrap",
-          lineHeight: 1,
-        }}
-      >
-        Causal
-      </div>
-
-      {/* Staggered text reveal */}
+      {/* Brand tag — top left, below nav */}
       <motion.div
-        className="relative z-10 text-center px-6 max-w-3xl mx-auto"
-        variants={staggerContainer}
-        initial="hidden"
-        animate="visible"
+        className="relative z-10 px-8 pt-28"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.8, delay: 0.1 }}
       >
-        <motion.p
-          variants={fadeUp}
-          className="font-mono text-[11px] tracking-[0.25em] text-white/30 uppercase mb-8"
-        >
-          Root Cause Intelligence for AI Agents
-        </motion.p>
+        <span className="font-mono text-[11px] tracking-[0.3em] text-white/25 uppercase">
+          Causal &nbsp;·&nbsp; Root Cause Intelligence
+        </span>
+      </motion.div>
 
+      {/* Main statement — fills the screen */}
+      <div className="relative z-10 flex-1 flex flex-col justify-center px-8 pt-8 pb-0">
         <motion.h1
-          variants={staggerContainer}
-          className="text-[48px] sm:text-[64px] md:text-[80px] font-light tracking-[-0.04em] leading-[1.05] mb-8 text-white"
+          variants={heroLines}
+          initial="hidden"
+          animate="visible"
+          className="font-light text-white leading-[0.95] tracking-[-0.03em]"
+          style={{ fontSize: "clamp(52px, 8.5vw, 118px)" }}
         >
-          <motion.span variants={fadeUp} className="block">
-            Agent failures
+          <motion.span variants={heroLineVariant} className="block">
+            We have reinvented
           </motion.span>
-          <motion.span variants={fadeUp} className="block">
-            shouldn&apos;t be a{" "}
-            <span className="gradient-text font-normal">black box.</span>
+          <motion.span variants={heroLineVariant} className="block text-white/60">
+            root cause analysis
+          </motion.span>
+          <motion.span variants={heroLineVariant} className="block">
+            for AI agents.
           </motion.span>
         </motion.h1>
 
-        <motion.p
-          variants={fadeUp}
-          className="text-[16px] sm:text-[18px] text-white/40 max-w-[480px] mx-auto leading-relaxed mb-14 font-light"
-        >
-          Trace incidents back to the exact prompt, inference step, or logic flaw that caused them.
-        </motion.p>
-
+        {/* Numbered capability list */}
         <motion.div
-          variants={fadeUp}
-          className="flex flex-col sm:flex-row items-center justify-center gap-4"
+          variants={capabilities}
+          initial="hidden"
+          animate="visible"
+          className="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-x-16 gap-y-3 max-w-3xl"
         >
+          {items.map((item, i) => (
+            <motion.div
+              key={i}
+              variants={capabilityVariant}
+              className="flex items-start gap-4"
+            >
+              <span className="font-mono text-[11px] tracking-[0.1em] text-white/20 shrink-0 mt-0.5">
+                {String(i + 1).padStart(2, "0")}
+              </span>
+              <span className="font-mono text-[12px] tracking-[0.05em] text-white/45 leading-snug">
+                {item}
+              </span>
+            </motion.div>
+          ))}
+        </motion.div>
+      </div>
+
+      {/* CTAs — pinned to bottom */}
+      <motion.div
+        className="relative z-10 px-8 pb-16 pt-12"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.9, delay: 1.9, ease: EASE_OUT }}
+      >
+        <div className="flex flex-col sm:flex-row items-start gap-4">
           <Link href="/incidents" className="xai-btn xai-btn-primary">
             DEPLOY INSTRUMENTATION <ArrowRight className="w-3.5 h-3.5" />
           </Link>
           <Link href="/traces" className="xai-btn">
             ACCESS SANDBOX <ExternalLink className="w-3 h-3" />
           </Link>
-        </motion.div>
-
-        <motion.p
-          variants={fadeUp}
-          className="mt-8 font-mono text-[11px] tracking-[0.15em] text-white/20 uppercase"
-        >
+        </div>
+        <p className="mt-5 font-mono text-[11px] tracking-[0.15em] text-white/20 uppercase">
           No credit card required &nbsp;·&nbsp; Free tier &nbsp;·&nbsp; Setup in 5 min
-        </motion.p>
+        </p>
       </motion.div>
 
       {/* Scroll hint */}
       <motion.div
-        className="absolute bottom-10 left-1/2 -translate-x-1/2 z-10"
+        className="absolute bottom-8 right-8 z-10"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ delay: 1.8, duration: 1 }}
+        transition={{ delay: 2.2, duration: 1 }}
       >
-        <div className="w-5 h-8 rounded-full border border-white/20 flex items-start justify-center p-1.5">
-          <div className="w-0.5 h-2 bg-white/40 rounded-full animate-bounce" />
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-[10px] tracking-[0.2em] text-white/15 uppercase">Scroll</span>
+          <div className="w-5 h-8 rounded-full border border-white/20 flex items-start justify-center p-1.5">
+            <div className="w-0.5 h-2 bg-white/40 rounded-full animate-bounce" />
+          </div>
         </div>
       </motion.div>
     </section>
@@ -533,10 +581,10 @@ function AnimatedCounter({
 
 function StatsSection() {
   const stats = [
-    { value: 2400000, display: "2.4M+", label: "Traces captured per month", prefix: "", suffix: "" },
-    { value: 1.8, display: "< 1.8s", label: "Average root-cause resolution", prefix: "< ", suffix: "s", decimals: 1 },
-    { value: 6, display: "6", label: "Causal model layers", prefix: "", suffix: "" },
-    { value: 99.9, display: "99.9%", label: "Graph assembly accuracy", prefix: "", suffix: "%", decimals: 1 },
+    { value: 2.4, label: "Traces captured per month", prefix: "", suffix: "M+", decimals: 1 },
+    { value: 1.8, label: "Average root-cause resolution", prefix: "", suffix: "s", decimals: 1, lessThan: true },
+    { value: 6, label: "Causal model layers", prefix: "", suffix: "" },
+    { value: 99.9, label: "Graph assembly accuracy", prefix: "", suffix: "%", decimals: 1 },
   ];
 
   return (
@@ -572,13 +620,21 @@ function StatsSection() {
           viewport={{ once: true, margin: "-60px" }}
           className="grid grid-cols-2 lg:grid-cols-4 gap-[1px] bg-white/[0.06]"
         >
-          {stats.map(({ value, label, prefix, suffix, decimals }) => (
+          {stats.map(({ value, label, prefix, suffix, decimals, lessThan }) => (
             <motion.div
               key={label}
               variants={cardVariant}
               className="bg-black p-10 flex flex-col gap-3"
             >
-              <div className="stat-number">
+              <div className="stat-number flex items-start">
+                {lessThan && (
+                  <span
+                    className="font-mono text-white/30 shrink-0"
+                    style={{ fontSize: "40%", marginTop: "0.25em", marginRight: "0.15em", lineHeight: 1 }}
+                  >
+                    &lt;
+                  </span>
+                )}
                 <AnimatedCounter value={value} prefix={prefix} suffix={suffix} decimals={decimals} />
               </div>
               <p className="font-mono text-[11px] tracking-[0.1em] text-white/30 uppercase leading-relaxed">
