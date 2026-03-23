@@ -206,51 +206,52 @@ function CausalGraphBackground() {
     };
     window.addEventListener("mousemove", onMouse);
 
-    // ── Node layout ──
-    // 6 layers (INTENT→SPEC→INFERENCE→LOGIC→STATE→FAILURE), scattered across screen
-    const layerX = [0.07, 0.22, 0.38, 0.55, 0.71, 0.86];
+    // Deterministic pseudo-random — no Math.random() in hot path
+    const sr = (seed: number) => {
+      const x = Math.sin(seed * 9301 + 49297) * 233280;
+      return x - Math.floor(x);
+    };
+
+    const layerX = [0.08, 0.22, 0.38, 0.55, 0.70, 0.84];
+    const LAYER_LABELS = ["INTENT", "SPEC", "INFERENCE", "LOGIC", "STATE", "FAILURE"];
 
     type NodeType = "start" | "normal" | "failure";
-    const rawNodes: { layer: number; y: number; nodeType: NodeType }[] = [
-      // INTENT
-      { layer: 0, y: 0.46, nodeType: "start" },
-      // SPEC
-      { layer: 1, y: 0.28, nodeType: "normal" },
-      { layer: 1, y: 0.63, nodeType: "normal" },
-      // INFERENCE
-      { layer: 2, y: 0.17, nodeType: "normal" },
-      { layer: 2, y: 0.44, nodeType: "normal" },
-      { layer: 2, y: 0.72, nodeType: "normal" },
-      // LOGIC
-      { layer: 3, y: 0.14, nodeType: "normal" },
-      { layer: 3, y: 0.33, nodeType: "normal" },
-      { layer: 3, y: 0.53, nodeType: "normal" },
-      { layer: 3, y: 0.74, nodeType: "normal" },
-      // STATE
-      { layer: 4, y: 0.24, nodeType: "normal" },
-      { layer: 4, y: 0.47, nodeType: "normal" },
-      { layer: 4, y: 0.70, nodeType: "normal" },
-      // FAILURE
-      { layer: 5, y: 0.36, nodeType: "failure" },
-      { layer: 5, y: 0.62, nodeType: "failure" },
+    interface GraphNode {
+      id: number; layer: number; x: number; y: number;
+      nodeType: NodeType; critical: boolean; label?: string;
+      radius: number; phase: number; driftA: number;
+    }
+
+    const rawNodes: { layer: number; y: number; nodeType: NodeType; label?: string }[] = [
+      { layer: 0, y: 0.46, nodeType: "start",   label: "entry"     },
+      { layer: 1, y: 0.28, nodeType: "normal",  label: "spec.a"    },
+      { layer: 1, y: 0.63, nodeType: "normal",  label: "spec.b"    },
+      { layer: 2, y: 0.17, nodeType: "normal"                       },
+      { layer: 2, y: 0.44, nodeType: "normal",  label: "llm.call"  },
+      { layer: 2, y: 0.72, nodeType: "normal"                       },
+      { layer: 3, y: 0.14, nodeType: "normal"                       },
+      { layer: 3, y: 0.33, nodeType: "normal"                       },
+      { layer: 3, y: 0.53, nodeType: "normal",  label: "eval"      },
+      { layer: 3, y: 0.74, nodeType: "normal"                       },
+      { layer: 4, y: 0.24, nodeType: "normal"                       },
+      { layer: 4, y: 0.47, nodeType: "normal",  label: "state.read" },
+      { layer: 4, y: 0.70, nodeType: "normal"                       },
+      { layer: 5, y: 0.36, nodeType: "failure", label: "ERR_ROOT"  },
+      { layer: 5, y: 0.62, nodeType: "failure", label: "ERR_SIDE"  },
     ];
 
-    // Critical path node indices: 0→2→4→8→11→13
     const criticalSet = new Set([0, 2, 4, 8, 11, 13]);
+    const CRITICAL_PATH = [0, 2, 4, 8, 11, 13];
 
-    const nodes = rawNodes.map((n, i) => ({
-      id: i,
-      layer: n.layer,
-      x: layerX[n.layer],
-      y: n.y,
-      nodeType: n.nodeType,
-      critical: criticalSet.has(i),
-      radius: n.nodeType === "start" ? 5.5 : n.nodeType === "failure" ? 4.5 : 2.5 + Math.random() * 1.8,
-      phase: Math.random() * Math.PI * 2,
-      driftA: Math.random() * Math.PI * 2,
+    const nodes: GraphNode[] = rawNodes.map((n, i) => ({
+      id: i, layer: n.layer,
+      x: layerX[n.layer], y: n.y,
+      nodeType: n.nodeType, critical: criticalSet.has(i), label: n.label,
+      radius: n.nodeType === "start" ? 6 : n.nodeType === "failure" ? 5 : 2.5 + sr(i) * 2,
+      phase: sr(i + 100) * Math.PI * 2,
+      driftA: sr(i + 200) * Math.PI * 2,
     }));
 
-    // ── Edge layout ──
     const criticalEdgeKeys = new Set(["0-2", "2-4", "4-8", "8-11", "11-13"]);
     const edgePairs: [number, number][] = [
       [0, 1], [0, 2],
@@ -260,21 +261,31 @@ function CausalGraphBackground() {
       [10, 13], [11, 13], [11, 14], [12, 14],
     ];
 
-    const edges = edgePairs.map(([f, t]) => {
+    const edges = edgePairs.map(([f, t], ei) => {
       const isCritical = criticalEdgeKeys.has(`${f}-${t}`);
       return {
-        from: f,
-        to: t,
-        critical: isCritical,
-        particles: Array.from({ length: isCritical ? 5 : 2 }, () => ({
-          t: Math.random(),
+        from: f, to: t, critical: isCritical,
+        particles: Array.from({ length: isCritical ? 8 : 2 }, (_, pi) => ({
+          t: sr(ei * 10 + pi),
           speed: isCritical
-            ? 0.0016 + Math.random() * 0.001
-            : 0.0005 + Math.random() * 0.0004,
+            ? 0.002 + sr(ei * 10 + pi + 500) * 0.0015
+            : 0.0006 + sr(ei * 10 + pi + 500) * 0.0004,
         })),
       };
     });
 
+    // Ordered critical edges for cascade
+    const criticalEdgesOrdered = [
+      edges.find(e => e.from === 0  && e.to === 2)!,
+      edges.find(e => e.from === 2  && e.to === 4)!,
+      edges.find(e => e.from === 4  && e.to === 8)!,
+      edges.find(e => e.from === 8  && e.to === 11)!,
+      edges.find(e => e.from === 11 && e.to === 13)!,
+    ];
+
+    // Ripple pool
+    const ripples: { nodeIdx: number; t: number }[] = [];
+    let nextRippleAt = 1.2;
     let animId: number;
     let time = 0;
 
@@ -283,21 +294,61 @@ function CausalGraphBackground() {
       const W = canvas.width;
       const H = canvas.height;
       const m = mouseRef.current;
-      const mx = (m.x - 0.5) * 0.022;
+      const mx = (m.x - 0.5) * 0.025;
       const my = (m.y - 0.5) * 0.018;
 
       ctx.clearRect(0, 0, W, H);
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, W, H);
 
-      // Soft ambient glow concentrated on the right half
+      // ── Dot grid ──
+      const gStep = Math.round(W / 28);
+      for (let gx = gStep; gx < W; gx += gStep) {
+        for (let gy = Math.round(gStep * 0.7); gy < H; gy += gStep) {
+          ctx.beginPath();
+          ctx.arc(gx, gy, 0.9, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(255,255,255,0.04)";
+          ctx.fill();
+        }
+      }
+
+      // ── Slow horizontal scan beam ──
+      const scanX = ((time * 0.055) % 1.25 - 0.1) * W;
+      const scanG = ctx.createLinearGradient(scanX - 90, 0, scanX + 90, 0);
+      scanG.addColorStop(0, "rgba(255,255,255,0)");
+      scanG.addColorStop(0.5, "rgba(255,255,255,0.018)");
+      scanG.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = scanG;
+      ctx.fillRect(0, 0, W, H);
+
+      // ── Ambient glow (right side) ──
       const ag = ctx.createRadialGradient(W * 0.65, H * 0.5, 0, W * 0.65, H * 0.5, W * 0.55);
-      ag.addColorStop(0, "rgba(255,255,255,0.012)");
+      ag.addColorStop(0, "rgba(255,255,255,0.018)");
       ag.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = ag;
       ctx.fillRect(0, 0, W, H);
 
-      // Compute live node canvas positions (includes drift + parallax)
+      // Failure zone red bleed
+      const pulseRed = 0.5 + 0.5 * Math.sin(time * 1.6);
+      const rg = ctx.createRadialGradient(W * 0.86, H * 0.5, 0, W * 0.86, H * 0.5, W * 0.32);
+      rg.addColorStop(0, `rgba(255,50,30,${0.038 + 0.022 * pulseRed})`);
+      rg.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = rg;
+      ctx.fillRect(0, 0, W, H);
+
+      // ── Layer labels ──
+      ctx.save();
+      ctx.textAlign = "center";
+      for (let li = 0; li < layerX.length; li++) {
+        const lx = (layerX[li] + mx) * W;
+        const isF = li === 5;
+        ctx.font = `600 ${10 * DPR}px ui-monospace, "SF Mono", monospace`;
+        ctx.fillStyle = isF ? `rgba(255,120,100,0.55)` : `rgba(255,255,255,0.2)`;
+        ctx.fillText(LAYER_LABELS[li], lx, 46 * DPR);
+      }
+      ctx.restore();
+
+      // ── Live node positions ──
       const pos = nodes.map((n) => {
         const drift = Math.sin(time * 0.18 + n.phase) * 0.007;
         return {
@@ -306,7 +357,24 @@ function CausalGraphBackground() {
         };
       });
 
-      // ── Draw background (non-critical) edges ──
+      // ── Cascade timing (every ~9s, active for ~3s) ──
+      const CASCADE_PERIOD = 4.5;
+      const CASCADE_ACTIVE = 1.6;
+      const tc = time % CASCADE_PERIOD;
+      const cascadeT = tc < CASCADE_ACTIVE ? tc / CASCADE_ACTIVE : -1;
+
+      // ── Spawn ripples ──
+      if (time > nextRippleAt) {
+        const ni = Math.floor(sr(Math.floor(time * 80)) * nodes.length);
+        ripples.push({ nodeIdx: ni, t: 0 });
+        nextRippleAt = time + 0.5 + sr(Math.floor(time * 80) + 777) * 0.7;
+      }
+      for (let ri = ripples.length - 1; ri >= 0; ri--) {
+        ripples[ri].t += 0.022;
+        if (ripples[ri].t > 1) ripples.splice(ri, 1);
+      }
+
+      // ── Non-critical edges ──
       for (const edge of edges) {
         if (edge.critical) continue;
         const { cx: x1, cy: y1 } = pos[edge.from];
@@ -321,121 +389,221 @@ function CausalGraphBackground() {
           p.t = (p.t + p.speed) % 1;
           const px = x1 + (x2 - x1) * p.t;
           const py = y1 + (y2 - y1) * p.t;
-          const a = Math.sin(p.t * Math.PI) * 0.22;
+          const a = Math.sin(p.t * Math.PI) * 0.2;
           ctx.beginPath();
-          ctx.arc(px, py, 1.2, 0, Math.PI * 2);
+          ctx.arc(px, py, 1.5, 0, Math.PI * 2);
           ctx.fillStyle = `rgba(255,255,255,${a})`;
           ctx.fill();
         }
       }
 
-      // ── Draw critical path edges (on top) ──
-      for (const edge of edges) {
-        if (!edge.critical) continue;
+      // ── Critical path edges (ordered, with cascade) ──
+      for (let ei = 0; ei < criticalEdgesOrdered.length; ei++) {
+        const edge = criticalEdgesOrdered[ei];
         const { cx: x1, cy: y1 } = pos[edge.from];
         const { cx: x2, cy: y2 } = pos[edge.to];
-        const pulse = 0.5 + 0.5 * Math.sin(time * 2.2);
+        const pulse = 0.5 + 0.5 * Math.sin(time * 2.5);
 
-        // Glow base line
+        // Wide glow
         ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.strokeStyle = `rgba(255,255,255,${0.09 + 0.04 * pulse})`;
-        ctx.lineWidth = 3;
+        ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+        ctx.strokeStyle = `rgba(255,255,255,${0.13 + 0.06 * pulse})`;
+        ctx.lineWidth = 6;
+        ctx.stroke();
+
+        // Core bright line
+        ctx.beginPath();
+        ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+        ctx.strokeStyle = `rgba(255,255,255,${0.35 + 0.1 * pulse})`;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
 
         // Animated dashes
         ctx.save();
         ctx.setLineDash([9, 9]);
-        ctx.lineDashOffset = -(time * 15) % 18;
+        ctx.lineDashOffset = -(time * 22) % 18;
         ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.strokeStyle = `rgba(255,255,255,${0.24 + 0.08 * pulse})`;
+        ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+        ctx.strokeStyle = `rgba(255,255,255,${0.38 + 0.12 * pulse})`;
         ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.restore();
 
-        // Flowing particles
+        // Cascade traveling orb
+        if (cascadeT >= 0) {
+          const edgeProgress = cascadeT * criticalEdgesOrdered.length - ei;
+          if (edgeProgress > 0 && edgeProgress < 1) {
+            const t = edgeProgress;
+            const cpx = x1 + (x2 - x1) * t;
+            const cpy = y1 + (y2 - y1) * t;
+            // Bright leading orb
+            const orbG = ctx.createRadialGradient(cpx, cpy, 0, cpx, cpy, 44);
+            orbG.addColorStop(0,    "rgba(255,255,255,1)");
+            orbG.addColorStop(0.12, "rgba(255,255,255,0.7)");
+            orbG.addColorStop(0.45, "rgba(255,255,255,0.1)");
+            orbG.addColorStop(1,    "rgba(255,255,255,0)");
+            ctx.fillStyle = orbG;
+            ctx.beginPath();
+            ctx.arc(cpx, cpy, 44, 0, Math.PI * 2);
+            ctx.fill();
+            // Trailing streak
+            const trailEnd = Math.max(0, t - 0.45);
+            const tx = x1 + (x2 - x1) * trailEnd;
+            const ty = y1 + (y2 - y1) * trailEnd;
+            const trailG = ctx.createLinearGradient(tx, ty, cpx, cpy);
+            trailG.addColorStop(0, "rgba(255,255,255,0)");
+            trailG.addColorStop(1, "rgba(255,255,255,0.75)");
+            ctx.beginPath();
+            ctx.moveTo(tx, ty);
+            ctx.lineTo(cpx, cpy);
+            ctx.strokeStyle = trailG;
+            ctx.lineWidth = 3.5;
+            ctx.stroke();
+          }
+        }
+
+        // Particles
         for (const p of edge.particles) {
           p.t = (p.t + p.speed) % 1;
           const px = x1 + (x2 - x1) * p.t;
           const py = y1 + (y2 - y1) * p.t;
           const a = Math.sin(p.t * Math.PI);
           ctx.beginPath();
-          ctx.arc(px, py, 2.5, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${0.75 * a})`;
+          ctx.arc(px, py, 3, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.88 * a})`;
           ctx.fill();
           ctx.beginPath();
-          ctx.arc(px, py, 7, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${0.1 * a})`;
+          ctx.arc(px, py, 9, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.13 * a})`;
           ctx.fill();
         }
       }
 
-      // ── Draw nodes ──
+      // ── Ripples ──
+      for (const rip of ripples) {
+        const { cx, cy } = pos[rip.nodeIdx];
+        const r = nodes[rip.nodeIdx].radius * DPR + 18 + rip.t * 32;
+        const a = (1 - rip.t) * 0.3;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.strokeStyle = nodes[rip.nodeIdx].nodeType === "failure"
+          ? `rgba(255,90,70,${a})`
+          : `rgba(255,255,255,${a * 0.55})`;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+
+      // ── Nodes ──
       for (let i = 0; i < nodes.length; i++) {
         const node = nodes[i];
         const { cx, cy } = pos[i];
-        const r = node.radius;
+        const r = node.radius * DPR;
         const pulse = 0.5 + 0.5 * Math.sin(time * 1.3 + node.phase);
 
+        // Cascade flash when orb reaches this node
+        let cascadeFlash = 0;
+        if (cascadeT >= 0 && node.critical) {
+          const cni = CRITICAL_PATH.indexOf(i);
+          if (cni >= 0) {
+            const nT = cascadeT * criticalEdgesOrdered.length - (cni - 0.5);
+            cascadeFlash = nT > 0 && nT < 1 ? Math.max(0, 1 - nT * 2) : 0;
+          }
+        }
+
         if (node.nodeType === "failure") {
-          // Red glow halo
-          const fg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 10);
-          fg.addColorStop(0, `rgba(255,70,70,${0.18 * pulse})`);
-          fg.addColorStop(1, "rgba(255,70,70,0)");
+          // Outer red halo
+          const fg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 16);
+          fg.addColorStop(0, `rgba(255,60,40,${0.24 + 0.1 * pulse + cascadeFlash * 0.5})`);
+          fg.addColorStop(1, "rgba(255,60,40,0)");
           ctx.fillStyle = fg;
           ctx.beginPath();
-          ctx.arc(cx, cy, r * 10, 0, Math.PI * 2);
+          ctx.arc(cx, cy, r * 16, 0, Math.PI * 2);
           ctx.fill();
+          // Spinning arcs
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(time * 0.9);
+          ctx.beginPath();
+          ctx.arc(0, 0, r + 9, 0, Math.PI * 1.4);
+          ctx.strokeStyle = `rgba(255,100,80,${0.5 + 0.2 * pulse})`;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.rotate(Math.PI);
+          ctx.beginPath();
+          ctx.arc(0, 0, r + 14, 0, Math.PI * 0.8);
+          ctx.strokeStyle = `rgba(255,130,100,${0.28 * pulse})`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.restore();
           // Core
           ctx.beginPath();
           ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,100,80,${0.75 + 0.15 * pulse})`;
+          ctx.fillStyle = `rgba(255,85,65,${0.9 + 0.08 * pulse})`;
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(cx, cy, r * 0.38, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(255,210,190,0.95)";
           ctx.fill();
         } else if (node.critical) {
-          // Bright white glow
-          const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 11);
-          cg.addColorStop(0, `rgba(255,255,255,${0.24 * pulse})`);
-          cg.addColorStop(0.35, `rgba(255,255,255,${0.07 * pulse})`);
-          cg.addColorStop(1, "rgba(255,255,255,0)");
-          ctx.fillStyle = cg;
-          ctx.beginPath();
-          ctx.arc(cx, cy, r * 11, 0, Math.PI * 2);
-          ctx.fill();
-          // Core
+          // Multi-layer white glow
+          for (const [gr, ga] of [
+            [r * 22, 0.06 * pulse + cascadeFlash * 0.38],
+            [r * 12, 0.15 * pulse + cascadeFlash * 0.48],
+            [r * 5,  0.30 * pulse],
+          ] as [number, number][]) {
+            const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, gr);
+            cg.addColorStop(0, `rgba(255,255,255,${ga})`);
+            cg.addColorStop(1, "rgba(255,255,255,0)");
+            ctx.fillStyle = cg;
+            ctx.beginPath();
+            ctx.arc(cx, cy, gr, 0, Math.PI * 2);
+            ctx.fill();
+          }
           ctx.beginPath();
           ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${0.9 + 0.08 * pulse})`;
+          ctx.fillStyle = `rgba(255,255,255,${0.92 + 0.07 * pulse})`;
           ctx.fill();
         } else {
-          // Dim normal node
-          const ng = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 6);
-          ng.addColorStop(0, `rgba(255,255,255,${0.08 * pulse})`);
+          const ng = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 7);
+          ng.addColorStop(0, `rgba(255,255,255,${0.1 * pulse})`);
           ng.addColorStop(1, "rgba(255,255,255,0)");
           ctx.fillStyle = ng;
           ctx.beginPath();
-          ctx.arc(cx, cy, r * 6, 0, Math.PI * 2);
+          ctx.arc(cx, cy, r * 7, 0, Math.PI * 2);
           ctx.fill();
           ctx.beginPath();
           ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${0.3 + 0.12 * pulse})`;
+          ctx.fillStyle = `rgba(255,255,255,${0.36 + 0.15 * pulse})`;
           ctx.fill();
         }
 
         // Start node — concentric rings
         if (node.nodeType === "start") {
-          ctx.beginPath();
-          ctx.arc(cx, cy, r + 8, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(255,255,255,${0.12 + 0.06 * pulse})`;
-          ctx.lineWidth = 1;
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(cx, cy, r + 16, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(255,255,255,${0.04 + 0.03 * pulse})`;
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
+          for (const [ringR, ringA] of [
+            [r + 10, 0.20 + 0.09 * pulse],
+            [r + 22, 0.08 + 0.04 * pulse],
+            [r + 40, 0.025 * pulse],
+          ] as [number, number][]) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(255,255,255,${ringA})`;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+        }
+
+        // Node label
+        if (node.label) {
+          ctx.save();
+          ctx.textAlign = "center";
+          ctx.font = `${8 * DPR}px ui-monospace, "SF Mono", monospace`;
+          ctx.fillStyle = node.nodeType === "failure"
+            ? `rgba(255,160,140,0.78)`
+            : node.critical
+              ? `rgba(255,255,255,0.58)`
+              : `rgba(255,255,255,0.26)`;
+          ctx.fillText(node.label, cx, cy + r + 14 * DPR);
+          ctx.restore();
         }
       }
 
@@ -453,11 +621,8 @@ function CausalGraphBackground() {
   return (
     <div className="absolute inset-0 pointer-events-none select-none overflow-hidden">
       <canvas ref={canvasRef} className="absolute inset-0" />
-      {/* Left vignette — keeps text readable */}
-      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/55 to-transparent" />
-      {/* Bottom fade into next section */}
+      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-transparent" />
       <div className="absolute bottom-0 left-0 right-0 h-56 bg-gradient-to-t from-black to-transparent" />
-      {/* Top fade */}
       <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/50 to-transparent" />
     </div>
   );
@@ -711,13 +876,13 @@ function StatsSection() {
             <motion.div
               key={label}
               variants={cardVariant}
-              className="bg-black p-10 flex flex-col gap-3"
+              className="bg-black p-10 flex flex-col gap-3 items-center text-center"
             >
-              <div className="stat-number flex items-start">
+              <div className="stat-number flex items-center">
                 {lessThan && (
                   <span
-                    className="font-mono text-white/30 shrink-0"
-                    style={{ fontSize: "40%", marginTop: "0.25em", marginRight: "0.15em", lineHeight: 1 }}
+                    className="font-mono text-white/45 shrink-0"
+                    style={{ fontSize: "72%", lineHeight: 1, marginRight: "0.08em" }}
                   >
                     &lt;
                   </span>
