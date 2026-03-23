@@ -532,13 +532,13 @@ function HeroSection() {
           style={{ fontSize: "clamp(52px, 8.5vw, 118px)" }}
         >
           <motion.span variants={heroLineVariant} className="block">
-            We have reinvented
+            Agent failures
           </motion.span>
           <motion.span variants={heroLineVariant} className="block text-white/60">
-            root cause analysis
+            shouldn&apos;t be
           </motion.span>
-          <motion.span variants={heroLineVariant} className="block">
-            for AI agents.
+          <motion.span variants={heroLineVariant} className="block gradient-text">
+            a black box.
           </motion.span>
         </motion.h1>
 

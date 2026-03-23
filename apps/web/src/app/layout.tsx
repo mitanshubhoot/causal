@@ -13,6 +13,11 @@ export const metadata: Metadata = {
   title: "Causal — Root Cause Intelligence for AI Agents",
   description:
     "Trace production incidents back through agent reasoning, code, and specs in 2 minutes instead of 2 days.",
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+    apple: "/favicon.svg",
+  },
   openGraph: {
     title: "Causal — Root Cause Intelligence",
     description: "Trace production incidents back through agent reasoning in 2 minutes.",
