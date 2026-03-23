@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -178,24 +178,12 @@ function Nav() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BLACKHOLE CANVAS
+// CAUSAL GRAPH BACKGROUND — full-screen animated graph network
 // ─────────────────────────────────────────────────────────────────────────────
 
-function InterstellarBlackhole() {
+function CausalGraphBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const mousePosRef = useRef({ x: 0, y: 0 });
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      const nx = (e.clientX - window.innerWidth / 2) * 0.02;
-      const ny = (e.clientY - window.innerHeight / 2) * 0.02;
-      mousePosRef.current = { x: nx, y: ny };
-      setMousePos({ x: nx, y: ny });
-    };
-    window.addEventListener("mousemove", handleMouseMove);
-    return () => window.removeEventListener("mousemove", handleMouseMove);
-  }, []);
+  const mouseRef = useRef({ x: 0.5, y: 0.5 });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -203,133 +191,253 @@ function InterstellarBlackhole() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
     const resize = () => {
-      canvas.width = window.innerWidth * 2;
-      canvas.height = window.innerHeight * 2;
+      canvas.width = window.innerWidth * DPR;
+      canvas.height = window.innerHeight * DPR;
       canvas.style.width = window.innerWidth + "px";
       canvas.style.height = window.innerHeight + "px";
     };
     resize();
     window.addEventListener("resize", resize);
 
-    interface Particle {
-      angle: number;
-      radius: number;
-      speed: number;
-      size: number;
-      brightness: number;
-      tilt: number;
-      phase: number;
-    }
+    const onMouse = (e: MouseEvent) => {
+      mouseRef.current = { x: e.clientX / window.innerWidth, y: e.clientY / window.innerHeight };
+    };
+    window.addEventListener("mousemove", onMouse);
 
-    const particles: Particle[] = [];
-    const PARTICLE_COUNT = 2000;
-    const EVENT_HORIZON = 550;
+    // ── Node layout ──
+    // 6 layers (INTENT→SPEC→INFERENCE→LOGIC→STATE→FAILURE), scattered across screen
+    const layerX = [0.07, 0.22, 0.38, 0.55, 0.71, 0.86];
 
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      const t = Math.random();
-      const radius = EVENT_HORIZON + 15 + Math.pow(t, 0.45) * 750;
-      const speed = (0.1 + Math.random() * 0.22) / (1 + (radius - EVENT_HORIZON) * 0.0015);
-      particles.push({
-        angle: Math.random() * Math.PI * 2,
-        radius,
-        speed: speed * (Math.random() > 0.5 ? 1 : -1),
-        size: 0.6 + Math.random() * 4.0,
-        brightness: 0.5 + Math.random() * 0.5,
-        tilt: -0.1 + Math.random() * 0.2,
-        phase: Math.random() * Math.PI * 2,
-      });
-    }
+    type NodeType = "start" | "normal" | "failure";
+    const rawNodes: { layer: number; y: number; nodeType: NodeType }[] = [
+      // INTENT
+      { layer: 0, y: 0.46, nodeType: "start" },
+      // SPEC
+      { layer: 1, y: 0.28, nodeType: "normal" },
+      { layer: 1, y: 0.63, nodeType: "normal" },
+      // INFERENCE
+      { layer: 2, y: 0.17, nodeType: "normal" },
+      { layer: 2, y: 0.44, nodeType: "normal" },
+      { layer: 2, y: 0.72, nodeType: "normal" },
+      // LOGIC
+      { layer: 3, y: 0.14, nodeType: "normal" },
+      { layer: 3, y: 0.33, nodeType: "normal" },
+      { layer: 3, y: 0.53, nodeType: "normal" },
+      { layer: 3, y: 0.74, nodeType: "normal" },
+      // STATE
+      { layer: 4, y: 0.24, nodeType: "normal" },
+      { layer: 4, y: 0.47, nodeType: "normal" },
+      { layer: 4, y: 0.70, nodeType: "normal" },
+      // FAILURE
+      { layer: 5, y: 0.36, nodeType: "failure" },
+      { layer: 5, y: 0.62, nodeType: "failure" },
+    ];
+
+    // Critical path node indices: 0→2→4→8→11→13
+    const criticalSet = new Set([0, 2, 4, 8, 11, 13]);
+
+    const nodes = rawNodes.map((n, i) => ({
+      id: i,
+      layer: n.layer,
+      x: layerX[n.layer],
+      y: n.y,
+      nodeType: n.nodeType,
+      critical: criticalSet.has(i),
+      radius: n.nodeType === "start" ? 5.5 : n.nodeType === "failure" ? 4.5 : 2.5 + Math.random() * 1.8,
+      phase: Math.random() * Math.PI * 2,
+      driftA: Math.random() * Math.PI * 2,
+    }));
+
+    // ── Edge layout ──
+    const criticalEdgeKeys = new Set(["0-2", "2-4", "4-8", "8-11", "11-13"]);
+    const edgePairs: [number, number][] = [
+      [0, 1], [0, 2],
+      [1, 3], [1, 4], [2, 4], [2, 5],
+      [3, 6], [3, 7], [4, 7], [4, 8], [5, 8], [5, 9],
+      [6, 10], [7, 10], [7, 11], [8, 11], [8, 12], [9, 12],
+      [10, 13], [11, 13], [11, 14], [12, 14],
+    ];
+
+    const edges = edgePairs.map(([f, t]) => {
+      const isCritical = criticalEdgeKeys.has(`${f}-${t}`);
+      return {
+        from: f,
+        to: t,
+        critical: isCritical,
+        particles: Array.from({ length: isCritical ? 5 : 2 }, () => ({
+          t: Math.random(),
+          speed: isCritical
+            ? 0.0016 + Math.random() * 0.001
+            : 0.0005 + Math.random() * 0.0004,
+        })),
+      };
+    });
 
     let animId: number;
     let time = 0;
 
     const draw = () => {
-      time += 0.003;
-      const w = canvas.width;
-      const h = canvas.height;
-      const cx = w / 2;
-      const cy = h * 0.42;
-      const mouse = mousePosRef.current;
+      time += 0.008;
+      const W = canvas.width;
+      const H = canvas.height;
+      const m = mouseRef.current;
+      const mx = (m.x - 0.5) * 0.022;
+      const my = (m.y - 0.5) * 0.018;
 
-      ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = "#000000";
-      ctx.fillRect(0, 0, w, h);
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, W, H);
 
-      const mox = mouse.x * 12;
-      const moy = mouse.y * 12;
-      const glowGrad = ctx.createRadialGradient(cx + mox, cy + moy, EVENT_HORIZON * 0.9, cx + mox, cy + moy, EVENT_HORIZON * 3.5);
-      glowGrad.addColorStop(0, "rgba(200,200,220,0.0)");
-      glowGrad.addColorStop(0.1, "rgba(240,240,255,0.12)");
-      glowGrad.addColorStop(0.25, "rgba(230,230,245,0.09)");
-      glowGrad.addColorStop(0.4, "rgba(210,210,230,0.06)");
-      glowGrad.addColorStop(0.6, "rgba(190,190,210,0.03)");
-      glowGrad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = glowGrad;
-      ctx.fillRect(0, 0, w, h);
+      // Soft ambient glow concentrated on the right half
+      const ag = ctx.createRadialGradient(W * 0.65, H * 0.5, 0, W * 0.65, H * 0.5, W * 0.55);
+      ag.addColorStop(0, "rgba(255,255,255,0.012)");
+      ag.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = ag;
+      ctx.fillRect(0, 0, W, H);
 
-      for (const p of particles) {
-        p.angle += p.speed * 0.003;
-        const rx = p.radius;
-        const ry = p.radius * 0.38;
-        const x = cx + Math.cos(p.angle) * rx + mouse.x * (8 + p.radius * 0.012);
-        const y = cy + Math.sin(p.angle) * ry + Math.sin(p.angle + p.phase) * p.tilt * p.radius + mouse.y * (8 + p.radius * 0.012);
-        const behindBlackhole = Math.sin(p.angle) > 0;
-        const distFromCenter = Math.sqrt(Math.pow(x - cx - mouse.x * 8, 2) + Math.pow(y - cy - mouse.y * 8, 2));
-        if (behindBlackhole && distFromCenter < EVENT_HORIZON * 1.1) continue;
-        const doppler = 0.6 + 0.4 * Math.cos(p.angle);
-        const alpha = p.brightness * doppler * (behindBlackhole ? 0.3 : 1);
-        const innerFactor = 1 - Math.min((p.radius - EVENT_HORIZON) / 600, 1);
-        const r = Math.floor(220 + innerFactor * 35);
-        const g = Math.floor(215 + innerFactor * 30);
-        const b = Math.floor(230 - innerFactor * 25);
+      // Compute live node canvas positions (includes drift + parallax)
+      const pos = nodes.map((n) => {
+        const drift = Math.sin(time * 0.18 + n.phase) * 0.007;
+        return {
+          cx: (n.x + Math.cos(n.driftA) * drift + mx) * W,
+          cy: (n.y + Math.sin(n.driftA) * drift + my) * H,
+        };
+      });
+
+      // ── Draw background (non-critical) edges ──
+      for (const edge of edges) {
+        if (edge.critical) continue;
+        const { cx: x1, cy: y1 } = pos[edge.from];
+        const { cx: x2, cy: y2 } = pos[edge.to];
         ctx.beginPath();
-        ctx.arc(x, y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${r},${g},${b},${alpha * 0.95})`;
-        ctx.fill();
-        if (p.size > 1.2 && alpha > 0.3) {
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = "rgba(255,255,255,0.05)";
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+        for (const p of edge.particles) {
+          p.t = (p.t + p.speed) % 1;
+          const px = x1 + (x2 - x1) * p.t;
+          const py = y1 + (y2 - y1) * p.t;
+          const a = Math.sin(p.t * Math.PI) * 0.22;
           ctx.beginPath();
-          ctx.arc(x, y, p.size * 5, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(${r},${g},${b},${alpha * 0.1})`;
-          ctx.fill();
-        }
-        if (p.size > 2.5 && alpha > 0.5) {
-          ctx.beginPath();
-          ctx.arc(x, y, p.size * 8, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(${r},${g},${b},${alpha * 0.04})`;
+          ctx.arc(px, py, 1.2, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${a})`;
           ctx.fill();
         }
       }
 
-      const ehx = cx + mouse.x * 8;
-      const ehy = cy + mouse.y * 8;
-      const ehGrad = ctx.createRadialGradient(ehx, ehy, 0, ehx, ehy, EVENT_HORIZON * 1.2);
-      ehGrad.addColorStop(0, "rgba(0,0,0,1)");
-      ehGrad.addColorStop(0.75, "rgba(0,0,0,1)");
-      ehGrad.addColorStop(0.9, "rgba(0,0,0,0.9)");
-      ehGrad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = ehGrad;
-      ctx.beginPath();
-      ctx.arc(ehx, ehy, EVENT_HORIZON * 1.2, 0, Math.PI * 2);
-      ctx.fill();
+      // ── Draw critical path edges (on top) ──
+      for (const edge of edges) {
+        if (!edge.critical) continue;
+        const { cx: x1, cy: y1 } = pos[edge.from];
+        const { cx: x2, cy: y2 } = pos[edge.to];
+        const pulse = 0.5 + 0.5 * Math.sin(time * 2.2);
 
-      ctx.beginPath();
-      ctx.arc(ehx, ehy, EVENT_HORIZON * 1.02, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(240,240,250,${0.12 + 0.04 * Math.sin(time * 8)})`;
-      ctx.lineWidth = 2;
-      ctx.stroke();
+        // Glow base line
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = `rgba(255,255,255,${0.09 + 0.04 * pulse})`;
+        ctx.lineWidth = 3;
+        ctx.stroke();
 
-      ctx.beginPath();
-      ctx.arc(ehx, ehy, EVENT_HORIZON * 1.08, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(230,230,240,${0.05 + 0.02 * Math.sin(time * 6)})`;
-      ctx.lineWidth = 1;
-      ctx.stroke();
+        // Animated dashes
+        ctx.save();
+        ctx.setLineDash([9, 9]);
+        ctx.lineDashOffset = -(time * 15) % 18;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = `rgba(255,255,255,${0.24 + 0.08 * pulse})`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
 
-      ctx.beginPath();
-      ctx.arc(ehx, ehy, EVENT_HORIZON * 1.25, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(220,220,230,${0.02 + 0.01 * Math.sin(time * 4)})`;
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
+        // Flowing particles
+        for (const p of edge.particles) {
+          p.t = (p.t + p.speed) % 1;
+          const px = x1 + (x2 - x1) * p.t;
+          const py = y1 + (y2 - y1) * p.t;
+          const a = Math.sin(p.t * Math.PI);
+          ctx.beginPath();
+          ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.75 * a})`;
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(px, py, 7, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.1 * a})`;
+          ctx.fill();
+        }
+      }
+
+      // ── Draw nodes ──
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        const { cx, cy } = pos[i];
+        const r = node.radius;
+        const pulse = 0.5 + 0.5 * Math.sin(time * 1.3 + node.phase);
+
+        if (node.nodeType === "failure") {
+          // Red glow halo
+          const fg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 10);
+          fg.addColorStop(0, `rgba(255,70,70,${0.18 * pulse})`);
+          fg.addColorStop(1, "rgba(255,70,70,0)");
+          ctx.fillStyle = fg;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r * 10, 0, Math.PI * 2);
+          ctx.fill();
+          // Core
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,100,80,${0.75 + 0.15 * pulse})`;
+          ctx.fill();
+        } else if (node.critical) {
+          // Bright white glow
+          const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 11);
+          cg.addColorStop(0, `rgba(255,255,255,${0.24 * pulse})`);
+          cg.addColorStop(0.35, `rgba(255,255,255,${0.07 * pulse})`);
+          cg.addColorStop(1, "rgba(255,255,255,0)");
+          ctx.fillStyle = cg;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r * 11, 0, Math.PI * 2);
+          ctx.fill();
+          // Core
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.9 + 0.08 * pulse})`;
+          ctx.fill();
+        } else {
+          // Dim normal node
+          const ng = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 6);
+          ng.addColorStop(0, `rgba(255,255,255,${0.08 * pulse})`);
+          ng.addColorStop(1, "rgba(255,255,255,0)");
+          ctx.fillStyle = ng;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r * 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.3 + 0.12 * pulse})`;
+          ctx.fill();
+        }
+
+        // Start node — concentric rings
+        if (node.nodeType === "start") {
+          ctx.beginPath();
+          ctx.arc(cx, cy, r + 8, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255,255,255,${0.12 + 0.06 * pulse})`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(cx, cy, r + 16, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255,255,255,${0.04 + 0.03 * pulse})`;
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
 
       animId = requestAnimationFrame(draw);
     };
@@ -338,40 +446,19 @@ function InterstellarBlackhole() {
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener("resize", resize);
+      window.removeEventListener("mousemove", onMouse);
     };
   }, []);
 
-  const { x: mx, y: my } = mousePos;
-
   return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
-      <canvas ref={canvasRef} className="absolute top-0 left-0" />
-      <div
-        className="absolute"
-        style={{
-          top: "42%", left: "50%", width: "800px", height: "400px",
-          transform: `translate(-50%, -50%) translate(${mx * 6}px, ${my * 6}px)`,
-          transition: "transform 0.5s ease-out",
-          background: "radial-gradient(ellipse 100% 60% at 50% 50%, rgba(210,210,230,0.04) 0%, rgba(200,200,220,0.02) 30%, transparent 55%)",
-          filter: "blur(50px)",
-          animation: "cosmic-breathe 10s ease-in-out infinite",
-        }}
-      />
-      <div
-        className="absolute"
-        style={{
-          top: "35%", left: "30%", width: "500px", height: "350px",
-          transform: `translate(-50%, -50%) translate(${mx * 3}px, ${my * 2}px)`,
-          transition: "transform 0.6s ease-out",
-          background: "radial-gradient(ellipse at center, rgba(100,130,200,0.03) 0%, transparent 50%)",
-          filter: "blur(70px)",
-          animation: "cosmic-breathe 14s ease-in-out 2s infinite",
-        }}
-      />
-      <div className="absolute bottom-0 left-0 right-0 h-72 bg-gradient-to-t from-black via-black/80 to-transparent" />
-      <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-black/60 to-transparent" />
-      <div className="absolute top-0 left-0 bottom-0 w-24 bg-gradient-to-r from-black/40 to-transparent" />
-      <div className="absolute top-0 right-0 bottom-0 w-24 bg-gradient-to-l from-black/40 to-transparent" />
+    <div className="absolute inset-0 pointer-events-none select-none overflow-hidden">
+      <canvas ref={canvasRef} className="absolute inset-0" />
+      {/* Left vignette — keeps text readable */}
+      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/55 to-transparent" />
+      {/* Bottom fade into next section */}
+      <div className="absolute bottom-0 left-0 right-0 h-56 bg-gradient-to-t from-black to-transparent" />
+      {/* Top fade */}
+      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/50 to-transparent" />
     </div>
   );
 }
@@ -420,8 +507,8 @@ function HeroSection() {
 
   return (
     <section className="relative min-h-screen overflow-hidden flex flex-col">
-      {/* Blackhole — full section background */}
-      <InterstellarBlackhole />
+      {/* Causal graph — full section background */}
+      <CausalGraphBackground />
 
       {/* Brand tag — top left, below nav */}
       <motion.div
