@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { createNode } from "../../services/nodes.js";
 import { runAutoLinkPipeline } from "../../services/autolink.js";
@@ -5,7 +6,21 @@ import { assembleTraceGraph } from "../../services/tracegraph.js";
 import { notifyIncidentTraced } from "../../services/slack.js";
 
 const pagerdutyWebhookPlugin: FastifyPluginAsync = async (fastify) => {
-  fastify.post("/pagerduty", async (request, reply) => {
+  fastify.post("/pagerduty", {
+    config: { rawBody: true },
+  }, async (request, reply) => {
+    // Verify PagerDuty webhook signature if configured
+    const pagerdutySecret = process.env["PAGERDUTY_WEBHOOK_SECRET"];
+    if (pagerdutySecret) {
+      const signature = request.headers["x-pagerduty-signature"] as string;
+      const rawBody = (request as unknown as { rawBody: Buffer }).rawBody;
+      const expected = `v1=${createHmac("sha256", pagerdutySecret).update(rawBody).digest("hex")}`;
+
+      if (!signature || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+        return reply.code(401).send({ error: "Invalid PagerDuty signature" });
+      }
+    }
+
     const body = request.body as Record<string, unknown>;
 
     // PagerDuty sends an array of messages
@@ -28,9 +43,8 @@ const pagerdutyWebhookPlugin: FastifyPluginAsync = async (fastify) => {
       const urgency = (incident["urgency"] as string) ?? "low";
       const service = (incident["service"] as Record<string, unknown>)?.["summary"] as string ?? "";
 
-      // Resolve orgId from service metadata
-      // In production, PagerDuty services are configured with org metadata
-      const orgId = "default"; // TODO: resolve from PagerDuty service config
+      // Resolve orgId from X-Causal-Org-Id header, fallback to "default"
+      const orgId = (request.headers["x-causal-org-id"] as string) || "default";
 
       const incidentNode = await createNode(fastify, {
         layer: "INCIDENT",
