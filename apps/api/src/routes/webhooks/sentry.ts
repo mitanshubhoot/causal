@@ -73,9 +73,9 @@ const sentryWebhookPlugin: FastifyPluginAsync = async (fastify) => {
     const rawStackTrace = culprit || exception;
     const frames = parseStackTrace(rawStackTrace);
 
-    // Determine project → orgId mapping
+    // Resolve orgId from X-Causal-Org-Id header, fallback to "default"
     const project = (body["project_slug"] as string) ?? "default";
-    const orgId = "default"; // TODO: resolve from Sentry DSN / org config
+    const orgId = (request.headers["x-causal-org-id"] as string) || "default";
 
     const incidentNode = await createNode(fastify, {
       layer: "INCIDENT",

@@ -1,11 +1,13 @@
 import type { CausalNode, TraceGraph, ReplayResult } from "@causal/types";
 
 const API_BASE = process.env["NEXT_PUBLIC_API_URL"] ?? "http://localhost:3001";
+const API_KEY = process.env["NEXT_PUBLIC_CAUSAL_API_KEY"] ?? "";
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      ...(API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {}),
       ...(init.headers ?? {}),
     },
     ...init,
