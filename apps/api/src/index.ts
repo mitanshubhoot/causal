@@ -4,6 +4,12 @@ import { config } from "./config.js";
 
 const app: FastifyInstance = await buildApp();
 
+// Ensure all plugins (neo4j, postgres, redis, auth, routes) are fully
+// initialized before this module finishes loading. Without this, Vercel's
+// adapter exports the app before app.ready() completes, and every incoming
+// request hangs waiting for initialization that never finishes.
+await app.ready();
+
 // Vercel's Fastify adapter intercepts listen() in serverless context.
 // In local dev this actually binds a port.
 app.listen({ port: config.API_PORT, host: config.API_HOST }).catch((err) => {
