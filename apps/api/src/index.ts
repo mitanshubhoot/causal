@@ -1,30 +1,23 @@
-import { config } from "./config.js";
 import { buildApp } from "./factory.js";
-import type { FastifyInstance } from "fastify";
+import { config } from "./config.js";
 
-let app: FastifyInstance | null = null;
+const app = await buildApp();
 
-async function main() {
-  app = await buildApp();
+// Vercel's Fastify adapter intercepts listen() in serverless context.
+// In local dev this actually binds a port.
+app.listen({ port: config.API_PORT, host: config.API_HOST }).catch((err) => {
+  app.log.error(err);
+  if (!process.env["VERCEL"]) process.exit(1);
+});
 
-  try {
-    await app.listen({ port: config.API_PORT, host: config.API_HOST });
-    app.log.info(`Causal API running on http://${config.API_HOST}:${config.API_PORT}`);
-  } catch (err) {
-    app.log.error(err);
-    process.exit(1);
-  }
-}
-
-// Graceful shutdown
+// Graceful shutdown (local dev only — Vercel manages lifecycle in production)
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, async () => {
-    if (app) {
-      app.log.info(`Received ${signal}, shutting down gracefully...`);
-      await app.close();
-    }
+    app.log.info(`Received ${signal}, shutting down gracefully...`);
+    await app.close();
     process.exit(0);
   });
 }
 
-main();
+// Required export: Vercel's serverless runtime invokes the exported app
+export default app;
