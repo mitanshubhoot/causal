@@ -2,14 +2,12 @@ import { uuidv7 } from "uuidv7";
 import type { FastifyPluginAsync } from "fastify";
 import { ReplayRequestSchema } from "@causal/types";
 import * as Diff from "diff";
-import Anthropic from "@anthropic-ai/sdk";
+import { Anthropic } from "@anthropic-ai/sdk";
 import { config } from "../config.js";
-
-type AnthropicClient = InstanceType<typeof Anthropic>;
 
 const IS_DEMO_MODE = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
 
-let anthropic: AnthropicClient | null = null;
+let anthropic: Anthropic | null = null;
 if (!IS_DEMO_MODE) {
   anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 }

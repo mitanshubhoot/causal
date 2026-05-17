@@ -3,15 +3,13 @@
  * 1536 dims, $0.02/1M tokens, populated async after node creation.
  */
 
-import OpenAI from "openai";
+import { OpenAI } from "openai";
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 
-type OpenAIClient = InstanceType<typeof OpenAI>;
+let openaiClient: OpenAI | null = null;
 
-let openaiClient: OpenAIClient | null = null;
-
-function getClient(): OpenAIClient {
+function getClient(): OpenAI {
   if (!openaiClient) {
     if (!config.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not configured");
     openaiClient = new OpenAI({ apiKey: config.OPENAI_API_KEY });
