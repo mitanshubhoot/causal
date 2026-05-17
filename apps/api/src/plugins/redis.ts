@@ -19,12 +19,7 @@ const redisPlugin: FastifyPluginAsync = async (fastify) => {
   client.on("error", (err: Error) => fastify.log.error({ err }, "Redis error"));
   client.on("connect", () => fastify.log.info("Redis connected"));
 
-  try {
-    await client.connect();
-    await client.ping();
-  } catch (err) {
-    fastify.log.warn({ err }, "Redis unreachable at startup — will retry on first query");
-  }
+  fastify.log.info("Redis client initialized (connection verified on first query)");
 
   fastify.decorate("redis", client);
 

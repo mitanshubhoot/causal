@@ -27,12 +27,7 @@ const neo4jPlugin: FastifyPluginAsync = async (fastify) => {
     }
   );
 
-  try {
-    await driver.verifyConnectivity();
-    fastify.log.info("Neo4j connected");
-  } catch (err) {
-    fastify.log.warn({ err }, "Neo4j unreachable at startup — will retry on first query");
-  }
+  fastify.log.info("Neo4j driver initialized (connection verified on first query)");
 
   const session = () => driver.session();
 

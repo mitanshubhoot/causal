@@ -18,12 +18,7 @@ const postgresPlugin: FastifyPluginAsync = async (fastify) => {
     onnotice: (n) => fastify.log.debug({ notice: n }, "pg notice"),
   });
 
-  try {
-    await sql`SELECT 1`;
-    fastify.log.info("PostgreSQL connected");
-  } catch (err) {
-    fastify.log.warn({ err }, "PostgreSQL unreachable at startup — will retry on first query");
-  }
+  fastify.log.info("PostgreSQL client initialized (connection verified on first query)");
 
   fastify.decorate("pg", sql);
 
