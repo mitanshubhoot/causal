@@ -1,14 +1,14 @@
 import { uuidv7 } from "uuidv7";
 import type { FastifyPluginAsync } from "fastify";
 import type { TraceGraph, RootCause } from "@causal/types";
+import { Anthropic } from "@anthropic-ai/sdk";
 import { assembleTraceGraph } from "../services/tracegraph.js";
 import { config } from "../config.js";
 
 const IS_DEMO_MODE = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
 
-let anthropic: InstanceType<typeof import("@anthropic-ai/sdk").default> | null = null;
+let anthropic: Anthropic | null = null;
 if (!IS_DEMO_MODE) {
-  const Anthropic = (await import("@anthropic-ai/sdk")).default;
   anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 }
 
