@@ -25,6 +25,103 @@ export async function assembleTraceGraph(
   let { maxDepth = 6, minWeight = 0.3 } = options;
   const traceId = uuidv7();
 
+  // ── 0. Check for pre-computed trace graph (demo mode) ────────────
+  try {
+    const cachedRows = await fastify.pg`
+      SELECT * FROM trace_graphs
+      WHERE root_node_id = ${rootNodeId} AND org_id = ${orgId} AND status = 'complete'
+      ORDER BY created_at DESC LIMIT 1
+    ` as Array<Record<string, unknown>>;
+
+    if (cachedRows.length) {
+      const cached = cachedRows[0]!;
+      const cachedRootCauses = (typeof cached["root_causes"] === "string"
+        ? JSON.parse(cached["root_causes"] as string)
+        : cached["root_causes"]) as RootCause[];
+
+      // Reconstruct nodes from Neo4j or Postgres
+      const nodeIds = cached["node_ids"] as string[];
+      let nodes: CausalNode[] = [];
+      let edges: CausalEdge[] = [];
+
+      try {
+        const result = await fetchAncestorGraph(fastify, rootNodeId, orgId, maxDepth, minWeight);
+        nodes = result.nodes;
+        edges = result.edges;
+        // If APOC returned fewer nodes than expected (e.g. APOC not installed),
+        // fall through to Postgres to fill in the missing ones
+        if (nodes.length < nodeIds.length) {
+          throw new Error("Incomplete APOC result — falling back to Postgres");
+        }
+      } catch {
+        // Fetch ALL nodes from Postgres by their IDs
+        nodes = [];
+        edges = [];
+        for (const nid of nodeIds) {
+          const nRows = await fastify.pg`
+            SELECT id, layer, kind, timestamp, agent_id, model_version, session_id, payload_text
+            FROM causal_nodes WHERE id = ${nid}
+          ` as Array<Record<string, unknown>>;
+          if (nRows[0]) {
+            const r = nRows[0];
+            nodes.push({
+              id: r["id"] as string, layer: r["layer"] as CausalNode["layer"],
+              kind: r["kind"] as string, timestamp: new Date(r["timestamp"] as string).getTime(),
+              agentId: r["agent_id"] as string | null, modelVersion: r["model_version"] as string | null,
+              sessionId: r["session_id"] as string | null, contextSnapId: null,
+              payload: {}, embedding: null, orgId, repoId: "",
+            });
+          }
+        }
+        const eRows = await fastify.pg`
+          SELECT * FROM causal_edges WHERE org_id = ${orgId}
+            AND source_id = ANY(${nodeIds}) AND target_id = ANY(${nodeIds})
+        ` as Array<Record<string, unknown>>;
+        edges = eRows.map(r => ({
+          id: r["id"] as string, sourceId: r["source_id"] as string,
+          targetId: r["target_id"] as string, type: r["type"] as CausalEdge["type"],
+          weight: Number(r["weight"]), linkStrategy: r["link_strategy"] as CausalEdge["linkStrategy"],
+          confirmedBy: null, isSuggested: false, orgId, createdAt: Date.now(),
+        }));
+      }
+
+      // Enrich ALL nodes with structured payload from Neo4j (simple MATCH, no APOC needed)
+      for (const n of nodes) {
+        if (!n.payload || Object.keys(n.payload).length === 0) {
+          try {
+            const neoRows = await fastify.neo4j.run<{ n: Record<string, unknown> }>(
+              `MATCH (n:CausalNode {id: $id}) RETURN n`, { id: n.id }
+            );
+            if (neoRows[0]) {
+              // Neo4j driver returns Node objects — unwrap .properties if needed
+              const rawNode = neoRows[0].n;
+              const props: Record<string, unknown> = (rawNode as { properties?: Record<string, unknown> }).properties ?? rawNode;
+              try { n.payload = JSON.parse((props["payloadJson"] as string) ?? "{}"); } catch { /* */ }
+              // Also fill in any missing fields from Neo4j
+              if (!n.kind && props["kind"]) n.kind = props["kind"] as string;
+              if (!n.agentId && props["agentId"]) n.agentId = props["agentId"] as string | null;
+              if (!n.modelVersion && props["modelVersion"]) n.modelVersion = props["modelVersion"] as string | null;
+              if (!n.sessionId && props["sessionId"]) n.sessionId = props["sessionId"] as string | null;
+            }
+          } catch { /* Neo4j down — leave empty payload */ }
+        }
+      }
+
+      if (cachedRootCauses.length > 0 && nodes.length > 0) {
+        return {
+          id: cached["id"] as string, rootNodeId, nodes, edges,
+          rootCauses: cachedRootCauses,
+          criticalPath: (cached["critical_path"] as string[]) ?? [],
+          status: "complete", confidence: cachedRootCauses[0]?.probability,
+          createdAt: new Date(cached["created_at"] as string).getTime(),
+          completedAt: Date.now(),
+        };
+      }
+    }
+  } catch (err) {
+    fastify.log.debug({ err }, "No cached trace graph found — assembling fresh");
+  }
+
   // Clamp minWeight to valid range [0.1, 0.99] to prevent degenerate graphs
   if (minWeight < 0.1 || minWeight > 0.99) {
     fastify.log.warn(
@@ -105,8 +202,8 @@ export async function assembleTraceGraph(
       ${traceId},
       ${orgId},
       ${rootNodeId},
-      ${nodes.map((n) => n.id)},
-      ${criticalPath},
+      ${nodes.map((n) => n.id).filter((id): id is string => id != null)},
+      ${criticalPath.filter((id): id is string => id != null)},
       ${JSON.stringify(rootCauses)},
       'complete',
       NOW(),
@@ -304,7 +401,9 @@ async function callRcaService(
 }
 
 // ── Neo4j record → CausalNode ─────────────────────────────────────
-function neo4jToNode(props: Record<string, unknown>): CausalNode {
+function neo4jToNode(rawProps: Record<string, unknown>): CausalNode {
+  // Neo4j driver Node objects have a .properties wrapper
+  const props: Record<string, unknown> = (rawProps as { properties?: Record<string, unknown> }).properties ?? rawProps;
   return {
     id: props["id"] as string,
     layer: props["layer"] as CausalNode["layer"],

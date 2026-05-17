@@ -8,15 +8,28 @@ export interface AuthUser {
   role: "admin" | "member" | "viewer";
 }
 
+// Demo mode constants — matches seed-demo.ts
+const DEMO_API_KEY = "causal_demo_key_2026";
+const DEMO_KEY_HASH = createHash("sha256").update(DEMO_API_KEY).digest("hex");
+const DEMO_ORG_ID = "org_demo_causal_001";
+
 declare module "fastify" {
   interface FastifyRequest {
     authUser: AuthUser;
   }
 }
 
+const authUsers = new WeakMap<FastifyRequest, AuthUser>();
+const defaultAuthUser: AuthUser = { userId: "", orgId: "", role: "viewer" };
+
 const authPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.decorateRequest<AuthUser>("authUser", {
-    getter() { return { userId: "", orgId: "", role: "viewer" as const }; },
+    getter(this: FastifyRequest) {
+      return authUsers.get(this) ?? defaultAuthUser;
+    },
+    setter(this: FastifyRequest, value: AuthUser) {
+      authUsers.set(this, value);
+    },
   });
 
   fastify.addHook(
@@ -40,8 +53,20 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       const token = spaceIdx === -1 ? undefined : authHeader.slice(spaceIdx + 1).trim() || undefined;
 
       if (scheme === "Bearer" && token) {
-        // API key auth: hash the provided key and look it up
+        // Demo mode: skip Postgres lookup for the known demo key
+        const isDev = process.env["NODE_ENV"] !== "production";
         const keyHash = createHash("sha256").update(token).digest("hex");
+
+        if (isDev && keyHash === DEMO_KEY_HASH) {
+          request.authUser = {
+            userId: "apikey:demo",
+            orgId: DEMO_ORG_ID,
+            role: "admin",
+          };
+          return;
+        }
+
+        // Standard API key auth: hash and look up
 
         const rows = await fastify.pg`
           SELECT ak.org_id, ak.id

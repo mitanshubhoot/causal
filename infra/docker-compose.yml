@@ -24,16 +24,16 @@ services:
       retries: 10
 
   postgres:
-    image: timescale/timescaledb-ha:pg16-latest
+    image: timescale/timescaledb:latest-pg16
     container_name: causal-postgres
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_DB: causal
       POSTGRES_USER: causal
       POSTGRES_PASSWORD: causal_dev_password
     volumes:
-      - postgres_data:/home/postgres/pgdata/data
+      - postgres_data:/var/lib/postgresql/data
       - ./postgres/migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U causal -d causal"]

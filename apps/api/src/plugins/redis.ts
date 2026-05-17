@@ -13,12 +13,13 @@ const redisPlugin: FastifyPluginAsync = async (fastify) => {
   const client = new Redis(config.REDIS_URL as string, {
     maxRetriesPerRequest: 3,
     enableOfflineQueue: false,
-    lazyConnect: false,
+    lazyConnect: true,
   });
 
   client.on("error", (err: Error) => fastify.log.error({ err }, "Redis error"));
   client.on("connect", () => fastify.log.info("Redis connected"));
 
+  await client.connect();
   await client.ping();
 
   fastify.decorate("redis", client);

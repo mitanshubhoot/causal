@@ -1,11 +1,16 @@
 import { uuidv7 } from "uuidv7";
 import type { FastifyPluginAsync } from "fastify";
 import { ReplayRequestSchema } from "@causal/types";
-import Anthropic from "@anthropic-ai/sdk";
 import * as Diff from "diff";
+import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
 
-const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+const IS_DEMO_MODE = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
+
+let anthropic: Anthropic | null = null;
+if (!IS_DEMO_MODE) {
+  anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+}
 
 const replayPlugin: FastifyPluginAsync = async (fastify) => {
   // POST /api/v1/replay — restore snapshot, apply mod, re-run, return diff
@@ -151,7 +156,11 @@ async function runAgentSession(
   // Filter to only user/assistant messages (remove system from messages array)
   const filteredMessages = messages.filter(
     (m) => m.role === "user" || m.role === "assistant"
-  ) as Anthropic.MessageParam[];
+  ) as Array<{ role: "user" | "assistant"; content: string }>;
+
+  if (!anthropic) {
+    return "Demo mode: replay output would appear here with a live Anthropic API key.";
+  }
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-6",

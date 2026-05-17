@@ -2,6 +2,7 @@
 -- Extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";  -- For text similarity
+CREATE EXTENSION IF NOT EXISTS "vector";   -- pgvector (must precede tables that use vector columns)
 
 -- ── Organizations ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS organizations (

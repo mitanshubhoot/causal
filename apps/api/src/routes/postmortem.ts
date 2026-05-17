@@ -1,11 +1,16 @@
 import { uuidv7 } from "uuidv7";
 import type { FastifyPluginAsync } from "fastify";
-import Anthropic from "@anthropic-ai/sdk";
 import type { TraceGraph, RootCause } from "@causal/types";
 import { assembleTraceGraph } from "../services/tracegraph.js";
 import { config } from "../config.js";
 
-const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+const IS_DEMO_MODE = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
+
+let anthropic: InstanceType<typeof import("@anthropic-ai/sdk").default> | null = null;
+if (!IS_DEMO_MODE) {
+  const Anthropic = (await import("@anthropic-ai/sdk")).default;
+  anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+}
 
 const postmortemPlugin: FastifyPluginAsync = async (fastify) => {
   // POST /api/v1/postmortem — generate post-mortem from a TraceGraph
@@ -96,6 +101,62 @@ const postmortemPlugin: FastifyPluginAsync = async (fastify) => {
 async function generatePostMortemMarkdown(traceGraph: TraceGraph): Promise<string> {
   const topCause = traceGraph.rootCauses[0];
 
+  // Demo mode: return pre-generated postmortem
+  if (IS_DEMO_MODE || !anthropic) {
+    const title = topCause?.explanation?.slice(0, 60) ?? "Agent Failure Incident";
+    return `# Post-Mortem — Incident ${new Date().toISOString().split("T")[0]}
+
+## Summary
+${topCause?.explanation ?? "An AI agent failure was detected through automated causal analysis. The root cause was identified in the reasoning layer where the agent made an incorrect assumption about the input data."}
+
+## Timeline
+- **T-6h** — Intent node created: user request received
+- **T-5h** — Spec node created: task requirements defined
+- **T-4h** — Reasoning session: agent made implementation decisions
+- **T-3h** — Code committed: changes deployed to staging
+- **T-1h** — Execution: anomalous behavior detected in production
+- **T-0** — Incident triggered: ${title}
+
+## Root Cause
+${topCause?.explanation ?? "The agent's reasoning step contained an incorrect assumption that was not caught by the spec constraints. This led to code that functioned correctly in test scenarios but failed on edge cases in production."}
+
+## Causal Chain
+${traceGraph.nodes.map(n => `- **[${n.layer}]** ${(n.payload as Record<string, unknown>)["title"] ?? n.kind}`).join("\n")}
+
+## What Went Wrong
+1. The spec did not include explicit constraints for the edge case that triggered the failure
+2. The agent's reasoning prioritized speed over accuracy when making implementation decisions
+3. The code review process did not catch the assumption made during the reasoning step
+4. No runtime guardrail existed to validate the agent's output before execution
+
+## Contributing Factors
+- Latency requirements in the spec created pressure to skip validation steps
+- The training data for the model did not include sufficient examples of this edge case
+- Monitoring was configured for errors but not for incorrect-but-successful responses
+
+## Detection
+The incident was detected via ${(topCause as Record<string, unknown>)?.["layer"] === "EXECUTION" ? "runtime monitoring" : "automated causal graph analysis"} approximately ${Math.round(traceGraph.criticalPath.length * 1.2)} hours after the initial reasoning decision.
+
+## Resolution
+1. Identified the root cause node in the ${topCause?.layer ?? "REASONING"} layer
+2. Updated the spec to include explicit constraints
+3. Added runtime validation guardrails
+4. Deployed fix to production
+
+## Action Items
+1. [Owner TBD] Update spec to include explicit validation requirements
+2. [Owner TBD] Add CLAUDE.md rule to prevent similar reasoning errors
+3. [Owner TBD] Implement runtime guardrail for output validation
+4. [Owner TBD] Add monitoring for incorrect-but-successful responses
+5. [Owner TBD] Review and update test coverage for edge cases
+
+## Lessons Learned
+- Specs must be explicit about edge cases, not just happy paths
+- Agent reasoning decisions should be validated against spec constraints before code generation
+- Runtime guardrails are essential for catching failures that pass code review
+- Causal graph analysis enables rapid root cause identification (${Math.round((topCause?.probability ?? 0.85) * 100)}% confidence)`;
+  }
+
   const prompt = `You are a senior engineering manager writing a post-mortem for an engineering team.
 
 INCIDENT INFORMATION:
@@ -123,7 +184,7 @@ Generate a structured post-mortem document in Markdown with these exact sections
 
 Write clearly. Avoid jargon. This document will be read by engineers and product managers.`;
 
-  const response = await anthropic.messages.create({
+  const response = await anthropic!.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 2000,
     messages: [{ role: "user", content: prompt }],

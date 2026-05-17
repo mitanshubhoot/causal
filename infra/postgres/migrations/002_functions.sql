@@ -20,7 +20,7 @@ RETURNS TABLE (
   layer TEXT,
   kind TEXT,
   payload_text TEXT,
-  timestamp TIMESTAMPTZ,
+  "timestamp" TIMESTAMPTZ,
   similarity FLOAT
 )
 LANGUAGE plpgsql
@@ -32,7 +32,7 @@ BEGIN
     cn.layer,
     cn.kind,
     cn.payload_text,
-    cn.timestamp,
+    cn.timestamp AS "timestamp",
     (1 - (cn.embedding <=> query_embedding))::FLOAT AS similarity
   FROM causal_nodes cn
   WHERE cn.org_id = p_org_id
