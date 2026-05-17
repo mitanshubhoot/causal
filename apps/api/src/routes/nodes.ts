@@ -6,6 +6,32 @@ import { populateNodeEmbedding } from "../services/embeddings.js";
 import { z } from "zod";
 
 const nodesPlugin: FastifyPluginAsync = async (fastify) => {
+  // GET /api/v1/nodes?layer=INCIDENT — list nodes by layer
+  fastify.get<{ Querystring: { layer?: string } }>("/", async (request, reply) => {
+    const { orgId } = request.authUser;
+    const layer = (request.query as Record<string, string>).layer;
+
+    if (layer) {
+      const rows = await fastify.pg`
+        SELECT id, layer, kind, timestamp, agent_id, model_version, session_id, payload_text
+        FROM causal_nodes
+        WHERE org_id = ${orgId} AND layer = ${layer}
+        ORDER BY timestamp DESC
+        LIMIT 50
+      ` as Array<Record<string, unknown>>;
+      return { nodes: rows, count: rows.length };
+    }
+
+    const rows = await fastify.pg`
+      SELECT id, layer, kind, timestamp, agent_id, model_version, session_id, payload_text
+      FROM causal_nodes
+      WHERE org_id = ${orgId}
+      ORDER BY timestamp DESC
+      LIMIT 100
+    ` as Array<Record<string, unknown>>;
+    return { nodes: rows, count: rows.length };
+  });
+
   // POST /api/v1/nodes — create a single node
   fastify.post("/", async (request, reply) => {
     const { authUser } = request;

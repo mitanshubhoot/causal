@@ -22,7 +22,9 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   // Nodes
   getNode: (id: string) => apiFetch<CausalNode>(`/api/v1/nodes/${id}`),
+  getNodes: (layer?: string) => apiFetch<{ nodes: unknown[]; count: number }>(`/api/v1/nodes${layer ? `?layer=${layer}` : ""}`),
   getAncestors: (id: string) => apiFetch<{ nodes: CausalNode[]; edges: unknown[] }>(`/api/v1/nodes/${id}/ancestors`),
+  getIncidents: () => apiFetch<{ nodes: unknown[]; count: number }>(`/api/v1/nodes?layer=INCIDENT`),
 
   // Trace
   getTrace: (rootNodeId: string) =>

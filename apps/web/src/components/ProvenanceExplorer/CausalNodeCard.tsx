@@ -35,32 +35,35 @@ export const CausalNodeCard = memo(function CausalNodeCard({
 
   return (
     <>
-      <Handle type="target" position={Position.Left} className="!bg-gray-600 !border-gray-500" />
+      <Handle type="target" position={Position.Left} className="!bg-white/20 !border-white/10 !w-1.5 !h-1.5" />
 
       <div
         className={`
-          w-64 rounded-xl border transition-all duration-150
+          w-64 rounded-xl border transition-all duration-200
           ${selected
-            ? "shadow-lg shadow-violet-500/20 border-violet-500"
+            ? "shadow-lg border-violet-400/40"
             : isOnCriticalPath
-            ? "border-violet-700"
-            : "border-gray-700"}
-          ${isRootCause ? "ring-2 ring-offset-1 ring-offset-gray-950" : ""}
-          bg-gray-900 hover:border-gray-600
+            ? "border-violet-400/20"
+            : "border-white/[0.08]"}
+          ${isRootCause ? "ring-1 ring-offset-1 ring-offset-black" : ""}
+          bg-black hover:border-white/[0.15]
         `}
-        style={isRootCause ? { boxShadow: `0 0 0 2px ${color}40` } : {}}
+        style={{
+          ...(isRootCause ? { boxShadow: `0 0 20px ${color}15, 0 0 0 1px ${color}30` } : {}),
+          ...(selected ? { boxShadow: `0 0 30px rgba(167,139,250,0.1)` } : {}),
+        }}
       >
         {/* Layer header */}
         <div
           className="px-3 py-2 rounded-t-xl flex items-center gap-2"
-          style={{ backgroundColor: `${color}20`, borderBottom: `1px solid ${color}30` }}
+          style={{ backgroundColor: `${color}08`, borderBottom: `1px solid ${color}15` }}
         >
-          <Icon className="w-3.5 h-3.5 flex-shrink-0" />
-          <span className="text-xs font-semibold uppercase tracking-wider" style={{ color }}>
+          <span style={{ color: `${color}90` }}><Icon className="w-3.5 h-3.5 flex-shrink-0" /></span>
+          <span className="font-mono text-[9px] tracking-[0.2em] uppercase" style={{ color: `${color}aa` }}>
             {node.layer}
           </span>
           {isRootCause && confidence !== undefined && (
-            <span className="ml-auto text-xs font-medium text-white bg-gray-700 px-1.5 py-0.5 rounded-full">
+            <span className="ml-auto font-mono text-[9px] tracking-[0.1em] text-white/60 bg-white/[0.06] border border-white/[0.08] px-1.5 py-0.5 rounded-full">
               {Math.round(confidence * 100)}%
             </span>
           )}
@@ -68,24 +71,24 @@ export const CausalNodeCard = memo(function CausalNodeCard({
 
         {/* Content */}
         <div className="px-3 py-3">
-          <p className="text-sm font-medium text-white leading-tight line-clamp-2">{title}</p>
+          <p className="text-[12px] font-medium text-white/80 leading-tight line-clamp-2">{title}</p>
           {subtitle && (
-            <p className="mt-1 text-xs text-gray-500 font-mono truncate">{subtitle}</p>
+            <p className="mt-1 text-[10px] text-white/20 font-mono truncate">{subtitle}</p>
           )}
         </div>
 
         {/* Critical path indicator */}
         {isOnCriticalPath && (
           <div className="px-3 pb-2">
-            <div className="flex items-center gap-1.5 text-xs text-violet-400">
-              <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
+            <div className="flex items-center gap-1.5 font-mono text-[9px] tracking-[0.12em] text-violet-400/50 uppercase">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400/50 animate-pulse" />
               Critical path
             </div>
           </div>
         )}
       </div>
 
-      <Handle type="source" position={Position.Right} className="!bg-gray-600 !border-gray-500" />
+      <Handle type="source" position={Position.Right} className="!bg-white/20 !border-white/10 !w-1.5 !h-1.5" />
     </>
   );
 });

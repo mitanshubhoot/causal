@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { buildApp } from "./app.js";
+import { buildApp } from "./factory.js";
 import type { FastifyInstance } from "fastify";
 
 let app: FastifyInstance | null = null;

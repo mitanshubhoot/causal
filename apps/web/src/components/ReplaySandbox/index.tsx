@@ -40,31 +40,31 @@ export function ReplaySandbox({ rootNodeId, snapshotId }: ReplaySandboxProps) {
   };
 
   return (
-    <div className="h-full flex">
+    <div className="h-full flex bg-black">
       {/* Left: Controls */}
-      <div className="w-96 border-r border-gray-800 flex flex-col p-4 gap-4 overflow-y-auto">
+      <div className="w-[400px] border-r border-white/[0.06] flex flex-col p-6 gap-6 overflow-y-auto flex-shrink-0">
         <div>
-          <h2 className="text-sm font-semibold text-white mb-1">Replay with Fix</h2>
-          <p className="text-xs text-gray-500">
+          <h2 className="text-[14px] font-medium text-white mb-1.5 tracking-wide">Replay with Fix</h2>
+          <p className="text-[12px] text-white/30 leading-relaxed">
             Modify the agent&apos;s context and re-run to verify your fix would have prevented the incident.
           </p>
         </div>
 
         {/* Modification type */}
         <div>
-          <label className="block text-xs font-medium text-gray-400 mb-2">Modification Type</label>
+          <label className="block font-mono text-[10px] tracking-[0.15em] text-white/25 uppercase mb-3">Modification Type</label>
           <div className="flex gap-2">
             {[
-              { value: "system_prompt_append", label: "Append to system prompt" },
+              { value: "system_prompt_append", label: "Append to prompt" },
               { value: "context_inject", label: "Inject context" },
             ].map(({ value, label }) => (
               <button
                 key={value}
                 onClick={() => setModType(value as typeof modType)}
-                className={`flex-1 text-xs px-3 py-2 rounded-lg border transition-colors ${
+                className={`flex-1 font-mono text-[10px] tracking-[0.1em] uppercase px-3 py-2.5 rounded-lg border transition-all duration-200 ${
                   modType === value
-                    ? "bg-violet-950 border-violet-700 text-violet-300"
-                    : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600"
+                    ? "border-white/20 text-white/60 bg-white/[0.06]"
+                    : "border-white/[0.06] text-white/25 hover:border-white/15 hover:text-white/40"
                 }`}
               >
                 {label}
@@ -75,7 +75,7 @@ export function ReplaySandbox({ rootNodeId, snapshotId }: ReplaySandboxProps) {
 
         {/* Modification content */}
         <div>
-          <label className="block text-xs font-medium text-gray-400 mb-2">
+          <label className="block font-mono text-[10px] tracking-[0.15em] text-white/25 uppercase mb-3">
             {modType === "system_prompt_append"
               ? "Text to append to system prompt"
               : "Context to inject"}
@@ -85,18 +85,18 @@ export function ReplaySandbox({ rootNodeId, snapshotId }: ReplaySandboxProps) {
             onChange={(e) => setModification(e.target.value)}
             placeholder={
               modType === "system_prompt_append"
-                ? "IMPORTANT: 'retry on failure' means HTTP 408 and 504 ONLY. Do not retry on 4xx client errors."
+                ? "IMPORTANT: Always confirm ASR transcriptions with confidence < 80% before proceeding..."
                 : "The relevant spec says: ..."
             }
             rows={8}
-            className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 font-mono resize-none focus:outline-none focus:border-violet-500 transition-colors"
+            className="w-full bg-white/[0.02] border border-white/[0.08] rounded-lg px-4 py-3 text-[13px] text-white/60 font-mono resize-none focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/15 leading-relaxed"
           />
         </div>
 
         {/* Fidelity note */}
-        <div className="flex items-start gap-2 bg-gray-800 rounded-lg p-3 text-xs">
-          <Info className="w-3.5 h-3.5 text-gray-500 flex-shrink-0 mt-0.5" />
-          <p className="text-gray-400">
+        <div className="flex items-start gap-3 border border-white/[0.06] rounded-lg p-4">
+          <Info className="w-3.5 h-3.5 text-white/20 flex-shrink-0 mt-0.5" />
+          <p className="text-[11px] text-white/25 leading-relaxed">
             Replay restores the exact context the agent had, applies your modification,
             and re-runs with the same model. A fidelity score shows how reliable the comparison is.
           </p>
@@ -105,16 +105,20 @@ export function ReplaySandbox({ rootNodeId, snapshotId }: ReplaySandboxProps) {
         <button
           onClick={runReplay}
           disabled={loading || !modification.trim()}
-          className="w-full flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-500 disabled:bg-gray-800 disabled:text-gray-600 text-white py-3 rounded-lg text-sm font-medium transition-colors"
+          className={`w-full flex items-center justify-center gap-2.5 py-3.5 rounded-lg font-mono text-[11px] tracking-[0.12em] uppercase transition-all duration-300 ${
+            loading || !modification.trim()
+              ? "border border-white/[0.06] text-white/15 cursor-not-allowed"
+              : "bg-white/10 border border-white/[0.12] text-white hover:bg-white/15 hover:border-white/25"
+          }`}
         >
           {loading ? (
             <>
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <div className="w-4 h-4 border-2 border-white/10 border-t-white/40 rounded-full animate-spin" />
               Running replay...
             </>
           ) : (
             <>
-              <Play className="w-4 h-4" />
+              <Play className="w-3.5 h-3.5" />
               Run Replay
             </>
           )}
@@ -124,21 +128,22 @@ export function ReplaySandbox({ rootNodeId, snapshotId }: ReplaySandboxProps) {
       {/* Right: Diff output */}
       <div className="flex-1 overflow-hidden flex flex-col">
         {!result && !error && !loading && (
-          <div className="flex-1 flex items-center justify-center text-gray-600">
+          <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <Play className="w-8 h-8 mx-auto mb-2 opacity-40" />
-              <p className="text-sm">Apply a modification and run the replay</p>
+              <Play className="w-8 h-8 mx-auto mb-3 text-white/10" />
+              <p className="text-[13px] text-white/20 mb-1">No replay results yet</p>
+              <p className="font-mono text-[10px] tracking-[0.1em] text-white/10 uppercase">Apply a modification and run the replay</p>
             </div>
           </div>
         )}
 
         {error && (
-          <div className="p-4">
-            <div className="bg-red-950 border border-red-800 rounded-lg p-4 flex items-start gap-3">
-              <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+          <div className="p-6">
+            <div className="border border-red-400/20 bg-red-400/5 rounded-lg p-5 flex items-start gap-3">
+              <AlertTriangle className="w-4 h-4 text-red-400/60 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-red-400">Replay failed</p>
-                <p className="text-xs text-gray-400 mt-1">{error}</p>
+                <p className="text-[13px] font-medium text-red-400/80 mb-1">Replay failed</p>
+                <p className="text-[12px] text-white/25 font-mono">{error}</p>
               </div>
             </div>
           </div>
@@ -146,30 +151,32 @@ export function ReplaySandbox({ rootNodeId, snapshotId }: ReplaySandboxProps) {
 
         {result && (
           <div className="flex-1 overflow-hidden flex flex-col">
-            {/* Fidelity score */}
-            <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-4">
-              <div className={`flex items-center gap-1.5 text-xs font-medium ${
-                result.fidelityScore >= 0.7 ? "text-green-400" :
-                result.fidelityScore >= 0.4 ? "text-yellow-400" : "text-red-400"
+            {/* Fidelity score bar */}
+            <div className="px-6 py-4 border-b border-white/[0.06] flex items-center gap-6">
+              <div className={`flex items-center gap-2 font-mono text-[10px] tracking-[0.12em] uppercase ${
+                result.fidelityScore >= 0.7 ? "text-emerald-400" :
+                result.fidelityScore >= 0.4 ? "text-amber-400" : "text-red-400"
               }`}>
                 <CheckCircle className="w-3.5 h-3.5" />
                 Fidelity: {Math.round(result.fidelityScore * 100)}%
               </div>
-              <span className="text-xs text-gray-500">Model: {result.modelUsed}</span>
+              <span className="font-mono text-[10px] tracking-[0.1em] text-white/20 uppercase">
+                Model: {result.modelUsed}
+              </span>
             </div>
 
             {/* Side-by-side diff */}
-            <div className="flex-1 overflow-hidden grid grid-cols-2 divide-x divide-gray-800">
+            <div className="flex-1 overflow-hidden grid grid-cols-2 divide-x divide-white/[0.06]">
               <OutputPanel title="Original Output" content={result.originalOutput} variant="original" />
               <OutputPanel title="Modified Output" content={result.modifiedOutput} variant="modified" />
             </div>
 
-            {/* Diff summary */}
-            <div className="border-t border-gray-800 px-4 py-3">
-              <div className="flex items-center gap-4 text-xs text-gray-500">
-                <span className="text-green-400">+{result.diff.filter((d) => d.type === "added").length} additions</span>
-                <span className="text-red-400">-{result.diff.filter((d) => d.type === "removed").length} removals</span>
-                <span>{result.diff.filter((d) => d.type === "unchanged").length} unchanged</span>
+            {/* Diff summary footer */}
+            <div className="border-t border-white/[0.06] px-6 py-3">
+              <div className="flex items-center gap-6 font-mono text-[10px] tracking-[0.1em] uppercase">
+                <span className="text-emerald-400/60">+{result.diff.filter((d) => d.type === "added").length} additions</span>
+                <span className="text-red-400/60">-{result.diff.filter((d) => d.type === "removed").length} removals</span>
+                <span className="text-white/15">{result.diff.filter((d) => d.type === "unchanged").length} unchanged</span>
               </div>
             </div>
           </div>
@@ -190,13 +197,13 @@ function OutputPanel({
 }) {
   return (
     <div className="flex flex-col overflow-hidden">
-      <div className={`px-4 py-2 text-xs font-medium border-b border-gray-800 ${
-        variant === "original" ? "text-gray-400" : "text-green-400"
+      <div className={`px-6 py-3 font-mono text-[10px] tracking-[0.15em] uppercase border-b border-white/[0.06] ${
+        variant === "original" ? "text-white/25" : "text-emerald-400/50"
       }`}>
         {title}
       </div>
       <div className="flex-1 overflow-y-auto">
-        <pre className="p-4 text-xs text-gray-300 font-mono whitespace-pre-wrap leading-relaxed">
+        <pre className="p-6 text-[12px] text-white/40 font-mono whitespace-pre-wrap leading-relaxed">
           {content}
         </pre>
       </div>
