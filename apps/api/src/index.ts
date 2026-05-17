@@ -1,7 +1,8 @@
+import type { FastifyInstance } from "fastify";
 import { buildApp } from "./factory.js";
 import { config } from "./config.js";
 
-const app = await buildApp();
+const app: FastifyInstance = await buildApp();
 
 // Vercel's Fastify adapter intercepts listen() in serverless context.
 // In local dev this actually binds a port.
