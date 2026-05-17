@@ -7,9 +7,11 @@ import OpenAI from "openai";
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 
-let openaiClient: OpenAI | null = null;
+type OpenAIClient = InstanceType<typeof OpenAI>;
 
-function getClient(): OpenAI {
+let openaiClient: OpenAIClient | null = null;
+
+function getClient(): OpenAIClient {
   if (!openaiClient) {
     if (!config.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not configured");
     openaiClient = new OpenAI({ apiKey: config.OPENAI_API_KEY });

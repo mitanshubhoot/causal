@@ -5,9 +5,11 @@ import * as Diff from "diff";
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
 
+type AnthropicClient = InstanceType<typeof Anthropic>;
+
 const IS_DEMO_MODE = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
 
-let anthropic: Anthropic | null = null;
+let anthropic: AnthropicClient | null = null;
 if (!IS_DEMO_MODE) {
   anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 }
