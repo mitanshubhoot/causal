@@ -1,3 +1,4 @@
+import type { FastifyInstance } from "fastify";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
@@ -25,36 +26,39 @@ import datadogWebhookPlugin from "./routes/webhooks/datadog.js";
 import linearWebhookPlugin from "./routes/webhooks/linear.js";
 import langsmithWebhookPlugin from "./routes/webhooks/langsmith.js";
 
-export async function buildApp() {
-  // pino-pretty spawns a Node.js worker thread that doesn't reliably
-  // initialize inside serverless functions — it hangs cold starts past
-  // the Vercel Hobby 10s timeout. Only use pretty logging in true local
-  // dev (when not running on Vercel/serverless).
-  const isLocalDev =
-    process.env["NODE_ENV"] !== "production" && !process.env["VERCEL"];
-  const app = Fastify({
-    logger: isLocalDev
-      ? { level: "debug", transport: { target: "pino-pretty", options: { colorize: true } } }
-      : { level: "info" },
-  });
-
-  // ── Core plugins ────────────────────────────────────────────────
-  await app.register(cors, {
+/**
+ * Register all plugins and routes against a Fastify instance.
+ *
+ * IMPORTANT: this function is intentionally synchronous and does NOT await
+ * any `register()` call. Vercel's Fastify framework preset wraps
+ * `fastify.listen()` and requires the module to finish evaluation
+ * synchronously so that the wrapper can hook into the instance before any
+ * request arrives. Top-level `await` here breaks that contract and causes
+ * `INTERNAL_FUNCTION_INVOCATION_TIMEOUT` on every request.
+ *
+ * Fastify queues `register()` calls and runs them lazily during `ready()`,
+ * which is triggered automatically by the first request (or by `listen()`
+ * in local dev). Errors during registration surface as request errors,
+ * not as boot failures.
+ */
+export function registerApp(app: FastifyInstance): void {
+  // Core plugins
+  app.register(cors, {
     origin: process.env["APP_URL"] ?? "http://localhost:3000",
     credentials: true,
   });
-  await app.register(sensible);
+  app.register(sensible);
 
-  // ── Infrastructure plugins ───────────────────────────────────────
-  await app.register(neo4jPlugin);
-  await app.register(postgresPlugin);
-  await app.register(redisPlugin);
-  await app.register(s3Plugin);
+  // Infrastructure plugins (lazy DB connections inside)
+  app.register(neo4jPlugin);
+  app.register(postgresPlugin);
+  app.register(redisPlugin);
+  app.register(s3Plugin);
 
-  // ── Auth ────────────────────────────────────────────────────────
-  await app.register(authPlugin);
+  // Auth
+  app.register(authPlugin);
 
-  // ── Health check (no auth) ──────────────────────────────────────
+  // Health checks (no auth)
   app.get("/health", async () => ({
     status: "ok",
     version: "0.1.0",
@@ -63,33 +67,30 @@ export async function buildApp() {
 
   app.get("/api/v1/health", async () => {
     const start = Date.now();
-    const services: Record<string, { status: string; latencyMs?: number }> = {};
+    const services: Record<string, { status: string; latencyMs?: number; error?: string }> = {};
 
-    // Neo4j
     try {
-      const neo4jStart = Date.now();
+      const t = Date.now();
       await app.neo4j.run("RETURN 1");
-      services.neo4j = { status: "connected", latencyMs: Date.now() - neo4jStart };
-    } catch {
-      services.neo4j = { status: "disconnected" };
+      services["neo4j"] = { status: "connected", latencyMs: Date.now() - t };
+    } catch (err) {
+      services["neo4j"] = { status: "disconnected", error: String(err).slice(0, 200) };
     }
 
-    // Postgres
     try {
-      const pgStart = Date.now();
+      const t = Date.now();
       await app.pg`SELECT 1`;
-      services.postgres = { status: "connected", latencyMs: Date.now() - pgStart };
-    } catch {
-      services.postgres = { status: "disconnected" };
+      services["postgres"] = { status: "connected", latencyMs: Date.now() - t };
+    } catch (err) {
+      services["postgres"] = { status: "disconnected", error: String(err).slice(0, 200) };
     }
 
-    // Redis
     try {
-      const redisStart = Date.now();
+      const t = Date.now();
       await app.redis.ping();
-      services.redis = { status: "connected", latencyMs: Date.now() - redisStart };
-    } catch {
-      services.redis = { status: "disconnected" };
+      services["redis"] = { status: "connected", latencyMs: Date.now() - t };
+    } catch (err) {
+      services["redis"] = { status: "disconnected", error: String(err).slice(0, 200) };
     }
 
     const allHealthy = Object.values(services).every((s) => s.status === "connected");
@@ -101,21 +102,37 @@ export async function buildApp() {
     };
   });
 
-  // ── API routes ──────────────────────────────────────────────────
-  await app.register(nodesPlugin,     { prefix: "/api/v1/nodes" });
-  await app.register(edgesPlugin,     { prefix: "/api/v1/edges" });
-  await app.register(snapshotsPlugin, { prefix: "/api/v1/snapshots" });
-  await app.register(tracePlugin,     { prefix: "/api/v1/trace" });
-  await app.register(replayPlugin,    { prefix: "/api/v1/replay" });
-  await app.register(postmortemPlugin, { prefix: "/api/v1/postmortem" });
+  // API routes
+  app.register(nodesPlugin,      { prefix: "/api/v1/nodes" });
+  app.register(edgesPlugin,      { prefix: "/api/v1/edges" });
+  app.register(snapshotsPlugin,  { prefix: "/api/v1/snapshots" });
+  app.register(tracePlugin,      { prefix: "/api/v1/trace" });
+  app.register(replayPlugin,     { prefix: "/api/v1/replay" });
+  app.register(postmortemPlugin, { prefix: "/api/v1/postmortem" });
 
-  // ── Webhooks (no auth — own signature verification) ─────────────
-  await app.register(githubWebhookPlugin,    { prefix: "/api/v1/webhooks" });
-  await app.register(pagerdutyWebhookPlugin, { prefix: "/api/v1/webhooks" });
-  await app.register(sentryWebhookPlugin,    { prefix: "/api/v1/webhooks" });
-  await app.register(datadogWebhookPlugin,   { prefix: "/api/v1/webhooks" });
-  await app.register(linearWebhookPlugin,    { prefix: "/api/v1/webhooks" });
-  await app.register(langsmithWebhookPlugin, { prefix: "/api/v1/webhooks" });
+  // Webhooks (own signature verification, no auth plugin)
+  app.register(githubWebhookPlugin,    { prefix: "/api/v1/webhooks" });
+  app.register(pagerdutyWebhookPlugin, { prefix: "/api/v1/webhooks" });
+  app.register(sentryWebhookPlugin,    { prefix: "/api/v1/webhooks" });
+  app.register(datadogWebhookPlugin,   { prefix: "/api/v1/webhooks" });
+  app.register(linearWebhookPlugin,    { prefix: "/api/v1/webhooks" });
+  app.register(langsmithWebhookPlugin, { prefix: "/api/v1/webhooks" });
+}
 
+/**
+ * Build a fully-registered Fastify app. Used by local dev (apps/api/src/index.ts
+ * in non-serverless mode) and by tests. For Vercel, prefer `registerApp` on a
+ * synchronously-instantiated Fastify instance.
+ */
+export async function buildApp(): Promise<FastifyInstance> {
+  const isLocalDev =
+    process.env["NODE_ENV"] !== "production" && !process.env["VERCEL"];
+  const app = Fastify({
+    logger: isLocalDev
+      ? { level: "debug", transport: { target: "pino-pretty", options: { colorize: true } } }
+      : { level: "info" },
+  });
+  registerApp(app);
+  await app.ready();
   return app;
 }
