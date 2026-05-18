@@ -35,6 +35,24 @@ const app = Fastify({
     : { level: "info" },
 });
 
+// Surface any error during request handling in the response body so we
+// can read it via curl. Vercel's FUNCTION_INVOCATION_FAILED page eats
+// stack traces, and the runtime log MCP truncates messages to ~30
+// chars, so explicit JSON errors are the most reliable diagnostic.
+app.setErrorHandler((error: Error & { code?: string }, _request, reply) => {
+  console.error(`[err] ${new Date().toISOString()}`, {
+    name: error.name,
+    message: error.message,
+    code: error.code,
+    stack: error.stack,
+  });
+  reply.status(500).send({
+    error: error.name,
+    message: error.message,
+    code: error.code,
+  });
+});
+
 // Immediate health endpoint — registered before the heavy async plugin
 // so a warm instance can answer /health without waiting for plugin load
 // (cold start still has to wait for ready() to drain the queue once).
@@ -43,7 +61,13 @@ app.get("/health", async () => ({
   version: "0.1.0",
   timestamp: Date.now(),
   cold: !globalThis.__causalReady,
+  node: process.version,
 }));
+
+// Diagnostic ping with zero dependencies — bypasses the async plugin
+// entirely. Useful to confirm the function-level adapter works even if
+// factory.js has problems loading.
+app.get("/_ping", async () => ({ pong: true, ts: Date.now() }));
 
 // Single deferred plugin that dynamically imports factory.js. The
 // dynamic import only runs when Fastify calls ready(), which means it
@@ -54,10 +78,17 @@ app.get("/health", async () => ({
 // pure module-load CPU on a serverless cold node.
 app.register(async (instance) => {
   console.error(`[boot] ${new Date().toISOString()} factory:loading`);
-  const { registerApp } = await import("./factory.js");
-  console.error(`[boot] ${new Date().toISOString()} factory:loaded`);
-  registerApp(instance);
-  console.error(`[boot] ${new Date().toISOString()} factory:registered`);
+  try {
+    const mod = await import("./factory.js");
+    console.error(`[boot] ${new Date().toISOString()} factory:loaded`);
+    mod.registerApp(instance);
+    console.error(`[boot] ${new Date().toISOString()} factory:registered`);
+  } catch (err) {
+    console.error(`[boot] ${new Date().toISOString()} factory:error`, err);
+    // Re-throw so /api/v1/* requests get a clear 500 explaining the
+    // missing infrastructure; /health and /_ping still work above.
+    throw err;
+  }
 });
 
 // Set a global after ready() to surface warm/cold state on /health.
