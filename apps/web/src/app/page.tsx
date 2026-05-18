@@ -742,7 +742,7 @@ function HeroSection() {
           <Link href="/incidents" className="xai-btn xai-btn-primary">
             DEPLOY INSTRUMENTATION <ArrowRight className="w-3.5 h-3.5" />
           </Link>
-          <Link href="/traces" className="xai-btn">
+          <Link href="/incidents" className="xai-btn">
             ACCESS SANDBOX <ExternalLink className="w-3 h-3" />
           </Link>
         </div>
