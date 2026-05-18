@@ -53,11 +53,13 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       const token = spaceIdx === -1 ? undefined : authHeader.slice(spaceIdx + 1).trim() || undefined;
 
       if (scheme === "Bearer" && token) {
-        // Demo mode: skip Postgres lookup for the known demo key
-        const isDev = process.env["NODE_ENV"] !== "production";
+        // Demo mode: skip Postgres lookup for the known public demo key.
+        // The demo key is a hardcoded public credential intended for getting
+        // started — allow it in any environment so the API works without
+        // needing to seed an api_keys row in Postgres first.
         const keyHash = createHash("sha256").update(token).digest("hex");
 
-        if (isDev && keyHash === DEMO_KEY_HASH) {
+        if (keyHash === DEMO_KEY_HASH) {
           request.authUser = {
             userId: "apikey:demo",
             orgId: DEMO_ORG_ID,

@@ -26,9 +26,14 @@ import linearWebhookPlugin from "./routes/webhooks/linear.js";
 import langsmithWebhookPlugin from "./routes/webhooks/langsmith.js";
 
 export async function buildApp() {
-  const isDev = process.env["NODE_ENV"] !== "production";
+  // pino-pretty spawns a Node.js worker thread that doesn't reliably
+  // initialize inside serverless functions — it hangs cold starts past
+  // the Vercel Hobby 10s timeout. Only use pretty logging in true local
+  // dev (when not running on Vercel/serverless).
+  const isLocalDev =
+    process.env["NODE_ENV"] !== "production" && !process.env["VERCEL"];
   const app = Fastify({
-    logger: isDev
+    logger: isLocalDev
       ? { level: "debug", transport: { target: "pino-pretty", options: { colorize: true } } }
       : { level: "info" },
   });
