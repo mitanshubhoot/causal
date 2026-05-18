@@ -176,21 +176,21 @@ function TreeNodeRow({
   return (
     <div>
       <div
-        className={`flex items-center gap-1 py-1.5 px-2 cursor-pointer transition-colors duration-150 group rounded-md mx-1 ${
+        className={`flex items-center gap-2 py-2 px-2 cursor-pointer transition-colors duration-150 group rounded-md mx-1.5 ${
           isSelected
-            ? "bg-white/[0.06]"
-            : "hover:bg-white/[0.03]"
+            ? "bg-white/10"
+            : "hover:bg-white/[0.04]"
         }`}
-        style={{ paddingLeft: `${treeNode.depth * 16 + 8}px` }}
+        style={{ paddingLeft: `${treeNode.depth * 18 + 8}px` }}
         onClick={() => onSelect(node)}
       >
         {/* Expand/collapse */}
         {children.length > 0 ? (
           <button
             onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
-            className="text-white/20 hover:text-white/40 transition-colors flex-shrink-0 w-4 h-4 flex items-center justify-center"
+            className="text-white/40 hover:text-white/80 transition-colors flex-shrink-0 w-4 h-4 flex items-center justify-center"
           >
-            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
           </button>
         ) : (
           <div className="w-4 flex-shrink-0" />
@@ -199,7 +199,7 @@ function TreeNodeRow({
         {/* Icon + root cause marker */}
         <span className="flex-shrink-0 relative">
           <span style={{ color: config.color }}>
-            <config.icon className="w-3.5 h-3.5" />
+            <config.icon className="w-4 h-4" />
           </span>
           {isRootCause && (
             <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-violet-400 rounded-full border border-black" />
@@ -207,27 +207,27 @@ function TreeNodeRow({
         </span>
 
         {/* Title */}
-        <span className={`text-[12px] truncate flex-1 ${isSelected ? "text-white/80" : "text-white/50"} ${isOnCriticalPath ? "font-medium" : ""}`}>
+        <span className={`text-[13px] truncate flex-1 ${isSelected ? "text-white font-medium" : "text-white/85"} ${isOnCriticalPath && !isSelected ? "font-medium" : ""}`}>
           {title}
         </span>
 
         {/* Root cause badge */}
         {isRootCause && (
-          <span className="font-mono text-[8px] tracking-[0.1em] uppercase bg-violet-500/15 text-violet-400/70 border border-violet-500/20 px-1.5 py-0.5 rounded flex-shrink-0">
+          <span className="font-mono text-[9px] tracking-[0.1em] uppercase bg-violet-500/20 text-violet-300 border border-violet-500/40 px-1.5 py-0.5 rounded flex-shrink-0 font-semibold">
             ROOT CAUSE
           </span>
         )}
 
         {/* Meta (duration, tokens) */}
         {meta && !isRootCause && (
-          <span className="font-mono text-[9px] text-white/15 flex-shrink-0 truncate max-w-[120px]">
+          <span className="font-mono text-[10px] text-white/45 flex-shrink-0 truncate max-w-[140px]">
             {meta}
           </span>
         )}
 
         {/* Error badge */}
         {hasError && (
-          <span className="font-mono text-[9px] tracking-[0.08em] uppercase bg-red-500/15 text-red-400/70 border border-red-500/20 px-1.5 py-0.5 rounded flex-shrink-0">
+          <span className="font-mono text-[9px] tracking-[0.08em] uppercase bg-red-500/20 text-red-300 border border-red-500/40 px-1.5 py-0.5 rounded flex-shrink-0 font-semibold">
             ERROR
           </span>
         )}
@@ -277,51 +277,52 @@ function DetailPanel({
   return (
     <div className="h-full flex flex-col bg-black">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-white/[0.06] flex-shrink-0">
-        <div className="flex items-center gap-2 mb-2">
+      <div className="px-6 py-5 border-b border-white/10 flex-shrink-0">
+        <div className="flex items-center gap-2.5 mb-2">
           <span style={{ color: config.color }}>
-            <config.icon className="w-4 h-4" />
+            <config.icon className="w-[18px] h-[18px]" />
           </span>
-          <h2 className="text-[14px] font-medium text-white">{config.label}</h2>
+          <h2 className="text-[16px] font-semibold text-white tracking-tight">{config.label}</h2>
           <button
             onClick={() => copyText(node.id, "id")}
-            className="text-white/15 hover:text-white/30 transition-colors ml-1"
+            className="text-white/40 hover:text-white/80 transition-colors ml-1"
+            title="Copy node ID"
           >
-            {copiedField === "id" ? <CheckCircle className="w-3 h-3 text-emerald-400/50" /> : <Copy className="w-3 h-3" />}
+            {copiedField === "id" ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
         </div>
-        <p className="font-mono text-[10px] text-white/20">{getTimeStr(node.timestamp)}</p>
+        <p className="font-mono text-[11px] text-white/55">{getTimeStr(node.timestamp)}</p>
 
         {/* Meta pills */}
         <div className="flex flex-wrap items-center gap-2 mt-3">
-          <span className="font-mono text-[9px] tracking-[0.1em] text-white/30 uppercase">
-            Kind: <span className="text-white/50">{node.kind}</span>
+          <span className="font-mono text-[10px] tracking-[0.08em] text-white/55 uppercase">
+            Kind: <span className="text-white/90 font-medium">{node.kind}</span>
           </span>
           {node.modelVersion && (
-            <span className="font-mono text-[9px] tracking-[0.05em] bg-emerald-500/10 text-emerald-400/60 border border-emerald-500/15 px-2 py-0.5 rounded-full">
+            <span className="font-mono text-[10px] tracking-[0.04em] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-medium">
               {node.modelVersion}
             </span>
           )}
           {(payload["modelId"] as string) && (
-            <span className="font-mono text-[9px] tracking-[0.05em] bg-emerald-500/10 text-emerald-400/60 border border-emerald-500/15 px-2 py-0.5 rounded-full">
+            <span className="font-mono text-[10px] tracking-[0.04em] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-medium">
               {payload["modelId"] as string}
             </span>
           )}
           {payload["latencyMs"] !== undefined && (
-            <span className="font-mono text-[9px] text-white/30">
+            <span className="font-mono text-[10px] text-white/70">
               ⏱ {String(payload["latencyMs"])}ms
             </span>
           )}
           {!!payload["totalTokens"] && (
-            <span className="font-mono text-[9px] text-white/30">
+            <span className="font-mono text-[10px] text-white/70">
               ⊙ {String(payload["totalTokens"])} tokens
             </span>
           )}
           {(payload["severity"] as string) && (
-            <span className={`font-mono text-[9px] tracking-[0.1em] uppercase px-2 py-0.5 rounded border ${
-              payload["severity"] === "P1" ? "text-red-400/70 bg-red-500/10 border-red-500/20" :
-              payload["severity"] === "P2" ? "text-amber-400/70 bg-amber-500/10 border-amber-500/20" :
-              "text-yellow-400/70 bg-yellow-500/10 border-yellow-500/20"
+            <span className={`font-mono text-[10px] tracking-[0.08em] uppercase px-2 py-0.5 rounded border font-semibold ${
+              payload["severity"] === "P1" ? "text-red-300 bg-red-500/15 border-red-500/40" :
+              payload["severity"] === "P2" ? "text-amber-300 bg-amber-500/15 border-amber-500/40" :
+              "text-yellow-300 bg-yellow-500/15 border-yellow-500/40"
             }`}>
               {payload["severity"] as string}
             </span>
@@ -333,19 +334,19 @@ function DetailPanel({
       <div className="flex-1 overflow-y-auto">
         {/* Root cause section */}
         {rootCause && (
-          <div className="px-5 py-4 border-b border-white/[0.06]">
-            <h3 className="font-mono text-[10px] tracking-[0.2em] text-violet-400/50 uppercase mb-3">Root Cause Analysis</h3>
-            <p className="text-[12px] text-white/50 leading-relaxed mb-3">{rootCause.explanation}</p>
+          <div className="px-6 py-5 border-b border-white/10">
+            <h3 className="font-mono text-[11px] tracking-[0.18em] text-violet-300 uppercase mb-3 font-semibold">Root Cause Analysis</h3>
+            <p className="text-[14px] text-white/95 leading-relaxed mb-3">{rootCause.explanation}</p>
             {rootCause.counterfactual && (
-              <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg p-3 mt-2">
-                <p className="font-mono text-[9px] tracking-[0.15em] text-cyan-400/50 uppercase mb-1">Counterfactual</p>
-                <p className="text-[11px] text-white/35 leading-relaxed">{rootCause.counterfactual}</p>
+              <div className="bg-white/[0.04] border border-white/10 rounded-lg p-4 mt-3">
+                <p className="font-mono text-[10px] tracking-[0.15em] text-cyan-300 uppercase mb-1.5 font-semibold">Counterfactual</p>
+                <p className="text-[13px] text-white/80 leading-relaxed">{rootCause.counterfactual}</p>
               </div>
             )}
             {rootCause.interventionPoint && (
-              <div className="mt-2">
-                <span className="font-mono text-[9px] tracking-[0.1em] text-white/20 uppercase">Fix: </span>
-                <span className="text-[11px] text-white/35">{rootCause.interventionPoint}</span>
+              <div className="mt-3">
+                <span className="font-mono text-[10px] tracking-[0.1em] text-white/60 uppercase font-semibold">Fix: </span>
+                <span className="text-[13px] text-white/85">{rootCause.interventionPoint}</span>
               </div>
             )}
           </div>
@@ -353,59 +354,60 @@ function DetailPanel({
 
         {/* Error section */}
         {(payload["error"] as string) && (
-          <div className="px-5 py-4 border-b border-white/[0.06]">
-            <h3 className="font-mono text-[10px] tracking-[0.2em] text-red-400/50 uppercase mb-2">Error</h3>
-            <div className="bg-red-500/[0.04] border border-red-500/10 rounded-lg p-3">
-              <p className="font-mono text-[11px] text-red-400/60 leading-relaxed">{payload["error"] as string}</p>
+          <div className="px-6 py-5 border-b border-white/10">
+            <h3 className="font-mono text-[11px] tracking-[0.18em] text-red-300 uppercase mb-2.5 font-semibold">Error</h3>
+            <div className="bg-red-500/[0.08] border border-red-500/25 rounded-lg p-4">
+              <p className="font-mono text-[12px] text-red-200 leading-relaxed">{payload["error"] as string}</p>
             </div>
           </div>
         )}
 
         {/* Stack trace */}
         {(payload["stackTrace"] as string) && (
-          <div className="px-5 py-4 border-b border-white/[0.06]">
-            <h3 className="font-mono text-[10px] tracking-[0.2em] text-white/20 uppercase mb-2">Stack Trace</h3>
-            <pre className="font-mono text-[10px] text-white/25 bg-white/[0.02] border border-white/[0.04] rounded-lg p-3 overflow-x-auto leading-relaxed">
+          <div className="px-6 py-5 border-b border-white/10">
+            <h3 className="font-mono text-[11px] tracking-[0.18em] text-white/65 uppercase mb-2.5 font-semibold">Stack Trace</h3>
+            <pre className="font-mono text-[12px] text-white/85 bg-white/[0.04] border border-white/10 rounded-lg p-4 overflow-x-auto leading-relaxed">
               {payload["stackTrace"] as string}
             </pre>
           </div>
         )}
 
         {/* Payload */}
-        <div className="px-5 py-4 border-b border-white/[0.06]">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-mono text-[10px] tracking-[0.2em] text-white/20 uppercase">Payload</h3>
+        <div className="px-6 py-5 border-b border-white/10">
+          <div className="flex items-center justify-between mb-2.5">
+            <h3 className="font-mono text-[11px] tracking-[0.18em] text-white/65 uppercase font-semibold">Payload</h3>
             <button
               onClick={() => copyText(JSON.stringify(payload, null, 2), "payload")}
-              className="text-white/15 hover:text-white/30 transition-colors"
+              className="text-white/40 hover:text-white/80 transition-colors"
+              title="Copy payload JSON"
             >
-              {copiedField === "payload" ? <CheckCircle className="w-3 h-3 text-emerald-400/50" /> : <Copy className="w-3 h-3" />}
+              {copiedField === "payload" ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
           </div>
-          <pre className="font-mono text-[10px] text-white/25 bg-white/[0.02] border border-white/[0.04] rounded-lg p-3 overflow-x-auto leading-relaxed max-h-[300px]">
+          <pre className="font-mono text-[12px] text-white/75 bg-white/[0.04] border border-white/10 rounded-lg p-4 overflow-x-auto leading-relaxed max-h-[320px]">
             {JSON.stringify(payload, null, 2)}
           </pre>
         </div>
 
         {/* Connections */}
         {(inEdges.length > 0 || outEdges.length > 0) && (
-          <div className="px-5 py-4 border-b border-white/[0.06]">
-            <h3 className="font-mono text-[10px] tracking-[0.2em] text-white/20 uppercase mb-3">Connections</h3>
-            <div className="space-y-2">
+          <div className="px-6 py-5 border-b border-white/10">
+            <h3 className="font-mono text-[11px] tracking-[0.18em] text-white/65 uppercase mb-3 font-semibold">Connections</h3>
+            <div className="space-y-1.5">
               {inEdges.map(e => (
-                <div key={e.id} className="flex items-center gap-2 text-[10px]">
-                  <span className="text-white/15">←</span>
-                  <span className="font-mono text-white/25">{e.type.toLowerCase().replace("_", " ")}</span>
-                  <span className="font-mono text-white/15">{Math.round(e.weight * 100)}%</span>
-                  <span className="font-mono text-[9px] text-white/10">{e.linkStrategy}</span>
+                <div key={e.id} className="flex items-center gap-2 text-[12px]">
+                  <span className="text-white/55 font-mono w-3">←</span>
+                  <span className="font-mono text-white/85">{e.type.toLowerCase().replace("_", " ")}</span>
+                  <span className="font-mono text-white/65">{Math.round(e.weight * 100)}%</span>
+                  <span className="font-mono text-[11px] text-white/45">{e.linkStrategy}</span>
                 </div>
               ))}
               {outEdges.map(e => (
-                <div key={e.id} className="flex items-center gap-2 text-[10px]">
-                  <span className="text-white/15">→</span>
-                  <span className="font-mono text-white/25">{e.type.toLowerCase().replace("_", " ")}</span>
-                  <span className="font-mono text-white/15">{Math.round(e.weight * 100)}%</span>
-                  <span className="font-mono text-[9px] text-white/10">{e.linkStrategy}</span>
+                <div key={e.id} className="flex items-center gap-2 text-[12px]">
+                  <span className="text-white/55 font-mono w-3">→</span>
+                  <span className="font-mono text-white/85">{e.type.toLowerCase().replace("_", " ")}</span>
+                  <span className="font-mono text-white/65">{Math.round(e.weight * 100)}%</span>
+                  <span className="font-mono text-[11px] text-white/45">{e.linkStrategy}</span>
                 </div>
               ))}
             </div>
@@ -413,8 +415,8 @@ function DetailPanel({
         )}
 
         {/* Node metadata */}
-        <div className="px-5 py-4">
-          <h3 className="font-mono text-[10px] tracking-[0.2em] text-white/20 uppercase mb-3">Metadata</h3>
+        <div className="px-6 py-5">
+          <h3 className="font-mono text-[11px] tracking-[0.18em] text-white/65 uppercase mb-3 font-semibold">Metadata</h3>
           <div className="space-y-2">
             <MetaRow label="Node ID" value={node.id} mono />
             <MetaRow label="Layer" value={node.layer} />
@@ -432,8 +434,8 @@ function DetailPanel({
 function MetaRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="font-mono text-[9px] tracking-[0.1em] text-white/15 uppercase flex-shrink-0 w-16 pt-0.5">{label}</span>
-      <span className={`text-[10px] text-white/30 break-all ${mono ? "font-mono" : ""}`}>{value}</span>
+      <span className="font-mono text-[10px] tracking-[0.1em] text-white/55 uppercase flex-shrink-0 w-20 pt-0.5 font-semibold">{label}</span>
+      <span className={`text-[12px] text-white/90 break-all ${mono ? "font-mono" : ""}`}>{value}</span>
     </div>
   );
 }
@@ -446,17 +448,23 @@ function RootCauseBanner({ rootCauses, nodes }: { rootCauses: RootCause[]; nodes
   const rcConfig = LAYER_CONFIG[rcNode?.layer ?? "INCIDENT"] ?? LAYER_CONFIG.INCIDENT!;
 
   return (
-    <div className="px-5 py-4 border-b border-violet-400/10 bg-violet-500/[0.03] flex-shrink-0">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
-        <span className="font-mono text-[9px] tracking-[0.2em] text-violet-400/60 uppercase">Root Cause — {rcConfig.label} Layer</span>
-        <span className="font-mono text-[9px] text-violet-400/40 ml-auto">{Math.round(primary.probability * 100)}% confidence</span>
+    <div className="px-6 py-5 border-b border-violet-400/20 bg-violet-500/[0.06] flex-shrink-0">
+      <div className="flex items-center gap-2.5 mb-3">
+        <div className="w-2 h-2 rounded-full bg-violet-400 ring-2 ring-violet-400/30" />
+        <span className="font-mono text-[11px] tracking-[0.18em] text-violet-200 uppercase font-semibold">
+          Root Cause · {rcConfig.label}
+        </span>
+        <span className="font-mono text-[11px] text-violet-300/80 ml-auto font-medium">
+          {Math.round(primary.probability * 100)}% confidence
+        </span>
       </div>
-      <p className="text-[12px] text-white/50 leading-relaxed mb-2">{primary.explanation}</p>
+      <p className="text-[14px] text-white/95 leading-relaxed mb-3">{primary.explanation}</p>
       {primary.counterfactual && (
-        <div className="bg-white/[0.02] border border-white/[0.04] rounded-lg p-3 mt-2">
-          <p className="font-mono text-[9px] tracking-[0.15em] text-cyan-400/40 uppercase mb-1">What would have prevented this</p>
-          <p className="text-[11px] text-white/30 leading-relaxed">{primary.counterfactual}</p>
+        <div className="bg-white/[0.04] border border-white/10 rounded-lg p-4 mt-3">
+          <p className="font-mono text-[10px] tracking-[0.15em] text-cyan-300 uppercase mb-1.5 font-semibold">
+            What would have prevented this
+          </p>
+          <p className="text-[13px] text-white/85 leading-relaxed">{primary.counterfactual}</p>
         </div>
       )}
     </div>
@@ -488,11 +496,15 @@ export function TraceExplorer({ traceGraph }: TraceExplorerProps) {
   return (
     <div className="flex h-full bg-black">
       {/* Left panel — Trace tree */}
-      <div className="w-80 border-r border-white/[0.06] flex flex-col flex-shrink-0">
+      <div className="w-[340px] border-r border-white/10 flex flex-col flex-shrink-0">
         {/* Tree header */}
-        <div className="px-4 py-3 border-b border-white/[0.06] flex items-center gap-2">
-          <span className="font-mono text-[10px] tracking-[0.2em] text-white/25 uppercase">Trace</span>
-          <span className="font-mono text-[9px] text-white/15">{traceGraph.id.slice(0, 12)}</span>
+        <div className="px-4 py-3.5 border-b border-white/10 flex items-center gap-2.5">
+          <span className="font-mono text-[11px] tracking-[0.18em] text-white/85 uppercase font-semibold">
+            Trace
+          </span>
+          <span className="font-mono text-[10px] text-white/55">
+            {traceGraph.id.slice(0, 12)}
+          </span>
         </div>
 
         {/* Tree content */}
@@ -510,15 +522,15 @@ export function TraceExplorer({ traceGraph }: TraceExplorerProps) {
         </div>
 
         {/* Tree footer stats */}
-        <div className="px-4 py-3 border-t border-white/[0.06] flex items-center gap-4">
-          <span className="font-mono text-[9px] text-white/15">
+        <div className="px-4 py-3 border-t border-white/10 flex items-center gap-4 bg-white/[0.02]">
+          <span className="font-mono text-[11px] text-white/70">
             {traceGraph.nodes.length} nodes
           </span>
-          <span className="font-mono text-[9px] text-white/15">
+          <span className="font-mono text-[11px] text-white/70">
             {traceGraph.edges.length} edges
           </span>
           {traceGraph.confidence !== undefined && (
-            <span className="font-mono text-[9px] text-white/15">
+            <span className="font-mono text-[11px] text-emerald-300 font-medium ml-auto">
               {Math.round(traceGraph.confidence * 100)}% conf
             </span>
           )}
@@ -526,7 +538,7 @@ export function TraceExplorer({ traceGraph }: TraceExplorerProps) {
       </div>
 
       {/* Right panel — Root cause banner + detail view */}
-      <div className="flex-1 overflow-hidden flex flex-col">
+      <div className="flex-1 overflow-hidden flex flex-col min-w-0">
         {/* Always-visible root cause summary */}
         <RootCauseBanner rootCauses={traceGraph.rootCauses} nodes={traceGraph.nodes} />
 
@@ -540,7 +552,9 @@ export function TraceExplorer({ traceGraph }: TraceExplorerProps) {
             />
           ) : (
             <div className="h-full flex items-center justify-center">
-              <p className="font-mono text-[11px] text-white/15 tracking-[0.1em] uppercase">Select a node to view details</p>
+              <p className="font-mono text-[12px] text-white/55 tracking-[0.1em] uppercase">
+                Select a node to view details
+              </p>
             </div>
           )}
         </div>
