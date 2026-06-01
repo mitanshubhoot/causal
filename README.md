@@ -1,6 +1,8 @@
 # Causal — Root Cause Intelligence for AI-Agent Engineering Teams
 
 > Automatically trace production incidents back through agent reasoning, code decisions, and specs — in 2 minutes instead of 2 days.
+<img width="1470" height="838" alt="image" src="https://github.com/user-attachments/assets/bec597a0-1c25-4023-a0bd-fcd758c7234d" />
+
 
 ## What Is This?
 
