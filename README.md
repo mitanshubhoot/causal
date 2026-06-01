@@ -14,6 +14,8 @@ INTENT → SPEC → REASONING → CODE → EXECUTION → INCIDENT
 
 And surfaces the critical path automatically when something breaks.
 
+<img width="1460" height="799" alt="image" src="https://github.com/user-attachments/assets/d6d4673b-2a64-4081-b870-1fb0c810d014" />
+
 ## Quick Start (Local Dev)
 
 ### 1. Prerequisites
