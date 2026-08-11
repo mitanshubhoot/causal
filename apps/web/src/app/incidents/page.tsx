@@ -15,6 +15,7 @@ import {
   Circle,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { isDemoMode } from "@/lib/mock-data";
 
 // ── Animation variants (matching landing page) ──────────────────
 const fadeUp = {
@@ -31,11 +32,13 @@ const cardVariant = {
 };
 
 // ── Severity config ──────────────────────────────────────────────
-const SEVERITY_CONFIG: Record<string, { color: string; bg: string; border: string; label: string }> = {
-  P1:       { color: "text-red-400",    bg: "bg-red-400/10",    border: "border-red-400/20",    label: "P1 · CRITICAL" },
-  P2:       { color: "text-amber-400",  bg: "bg-amber-400/10",  border: "border-amber-400/20",  label: "P2 · HIGH" },
-  P3:       { color: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/20", label: "P3 · MEDIUM" },
-  P4:       { color: "text-white/40",   bg: "bg-white/5",       border: "border-white/10",      label: "P4 · LOW" },
+// `dot` is an explicit static class — a runtime-built `bg-*` from `color`
+// would be purged by Tailwind and render invisible.
+const SEVERITY_CONFIG: Record<string, { color: string; bg: string; border: string; dot: string; label: string }> = {
+  P1:       { color: "text-red-400",    bg: "bg-red-400/10",    border: "border-red-400/20",    dot: "bg-red-400",    label: "P1 · CRITICAL" },
+  P2:       { color: "text-amber-400",  bg: "bg-amber-400/10",  border: "border-amber-400/20",  dot: "bg-amber-400",  label: "P2 · HIGH" },
+  P3:       { color: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/20", dot: "bg-yellow-400", label: "P3 · MEDIUM" },
+  P4:       { color: "text-white/40",   bg: "bg-white/5",       border: "border-white/10",      dot: "bg-white/40",   label: "P4 · LOW" },
 };
 
 // ── Status config — give incidents realistic status based on age ─
@@ -126,10 +129,18 @@ export default function IncidentsPage() {
             <span className="text-[14px] font-medium text-white tracking-wide">Causal</span>
           </Link>
           <div className="flex items-center gap-6">
-            <Link href="/" className="font-mono text-[11px] tracking-[0.15em] text-white/30 hover:text-white/60 transition-colors uppercase">
+            {isDemoMode() && (
+              <span
+                className="font-mono text-[9px] tracking-[0.18em] text-amber-300/90 uppercase border border-amber-400/30 bg-amber-400/[0.08] px-2.5 py-1 rounded-full"
+                title="You're exploring a sample workspace: 3 real-world AI-agent incidents with full 6-layer causal chains. No signup needed."
+              >
+                Demo Workspace · Acme Corp
+              </span>
+            )}
+            <Link href="/" className="font-mono text-[11px] tracking-[0.15em] text-white/50 hover:text-white/80 transition-colors uppercase">
               Home
             </Link>
-            <span className="font-mono text-[11px] tracking-[0.15em] text-white/60 uppercase border-b border-white/30 pb-0.5">
+            <span className="font-mono text-[11px] tracking-[0.15em] text-white/80 uppercase border-b border-white/30 pb-0.5">
               Incidents
             </span>
           </div>
@@ -147,7 +158,7 @@ export default function IncidentsPage() {
               <motion.h1 variants={fadeUp} className="text-[40px] sm:text-[56px] font-light tracking-[-0.03em] text-white mb-6">
                 Active Incidents
               </motion.h1>
-              <motion.p variants={fadeUp} className="text-[15px] text-white/30 max-w-lg">
+              <motion.p variants={fadeUp} className="text-[15px] text-white/55 max-w-lg">
                 Monitor, diagnose, and resolve AI agent failures. Click any incident to explore the full causal graph.
               </motion.p>
             </motion.div>
@@ -175,7 +186,7 @@ export default function IncidentsPage() {
                   </div>
                   <div>
                     <p className={`text-[28px] font-light tabular-nums ${highlight ?? "text-white"}`}>{value}</p>
-                    <p className="font-mono text-[10px] tracking-[0.15em] text-white/25 uppercase">{label}</p>
+                    <p className="font-mono text-[10px] tracking-[0.15em] text-white/45 uppercase">{label}</p>
                   </div>
                 </motion.div>
               ))}
@@ -229,9 +240,9 @@ export default function IncidentsPage() {
               </div>
             ) : filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-32 text-center">
-                <AlertTriangle className="w-8 h-8 text-white/10 mb-4" />
-                <p className="text-[14px] text-white/30 mb-2">No incidents found</p>
-                <p className="text-[12px] text-white/15 font-mono">Run the seed script to populate demo data</p>
+                <AlertTriangle className="w-8 h-8 text-white/15 mb-4" />
+                <p className="text-[14px] text-white/50 mb-2">No incidents match your filters</p>
+                <p className="text-[12px] text-white/30 font-mono">Clear the search or severity filter to see the sample workspace</p>
               </div>
             ) : (
               <motion.div
@@ -257,7 +268,7 @@ export default function IncidentsPage() {
                         id={`incident-${incident.id.slice(0, 8)}`}
                       >
                         {/* Severity indicator */}
-                        <div className={`flex-shrink-0 w-2 h-2 rounded-full ${sevConfig.color.replace("text-", "bg-")}`} />
+                        <div className={`flex-shrink-0 w-2 h-2 rounded-full ${sevConfig.dot}`} />
 
                         {/* Main content */}
                         <div className="flex-1 min-w-0">
@@ -285,9 +296,9 @@ export default function IncidentsPage() {
                           </div>
                         </div>
 
-                        {/* Diagnose button */}
-                        <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                          <span className="flex items-center gap-1.5 font-mono text-[11px] tracking-[0.15em] text-white/50 uppercase border border-white/[0.12] px-4 py-2 rounded-full hover:border-white/25 hover:text-white/70 transition-all duration-200">
+                        {/* Diagnose button — visible at rest (hover-only hides it on touch) */}
+                        <div className="flex-shrink-0 opacity-60 group-hover:opacity-100 transition-opacity duration-200">
+                          <span className="flex items-center gap-1.5 font-mono text-[11px] tracking-[0.15em] text-white/55 uppercase border border-white/[0.12] px-4 py-2 rounded-full group-hover:border-white/25 group-hover:text-white/80 transition-all duration-200">
                             Diagnose <ArrowUpRight className="w-3 h-3" />
                           </span>
                         </div>

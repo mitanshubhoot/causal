@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from "react";
 import Link from "next/link";
+import { FEATURED_INCIDENT_ID } from "@/lib/mock-data";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import {
   motion,
+  MotionConfig,
   useMotionValue,
   useTransform,
   animate,
@@ -190,6 +192,11 @@ function CausalGraphBackground() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+
+    // Respect reduced-motion (draw one static frame, no loop) and pause the
+    // loop when the hero scrolls off-screen or the tab is hidden.
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let running = true;
 
     const DPR = Math.min(window.devicePixelRatio || 1, 2);
     const resize = () => {
@@ -607,12 +614,39 @@ function CausalGraphBackground() {
         }
       }
 
-      animId = requestAnimationFrame(draw);
+      if (!prefersReduced && running) animId = requestAnimationFrame(draw);
     };
+
+    // Pause/resume the loop as the hero enters/leaves the viewport.
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        const wasRunning = running;
+        running = !!entry?.isIntersecting;
+        if (running && !wasRunning && !prefersReduced && !document.hidden) {
+          cancelAnimationFrame(animId);
+          animId = requestAnimationFrame(draw);
+        }
+      },
+      { threshold: 0 }
+    );
+    io.observe(canvas);
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        running = false;
+      } else if (!prefersReduced) {
+        running = true;
+        cancelAnimationFrame(animId);
+        animId = requestAnimationFrame(draw);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     draw();
     return () => {
       cancelAnimationFrame(animId);
+      io.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("resize", resize);
       window.removeEventListener("mousemove", onMouse);
     };
@@ -739,15 +773,15 @@ function HeroSection() {
         transition={{ duration: 0.9, delay: 1.9, ease: EASE_OUT }}
       >
         <div className="flex flex-col sm:flex-row items-start gap-4">
-          <Link href="/incidents" className="xai-btn xai-btn-primary">
-            DEPLOY INSTRUMENTATION <ArrowRight className="w-3.5 h-3.5" />
+          <Link href={`/incidents/${FEATURED_INCIDENT_ID}`} className="xai-btn xai-btn-primary">
+            EXPLORE A LIVE INCIDENT <ArrowRight className="w-3.5 h-3.5" />
           </Link>
           <Link href="/incidents" className="xai-btn">
-            ACCESS SANDBOX <ExternalLink className="w-3 h-3" />
+            BROWSE ALL INCIDENTS <ExternalLink className="w-3 h-3" />
           </Link>
         </div>
-        <p className="mt-5 font-mono text-[11px] tracking-[0.15em] text-white/20 uppercase">
-          No credit card required &nbsp;·&nbsp; Free tier &nbsp;·&nbsp; Setup in 5 min
+        <p className="mt-5 font-mono text-[11px] tracking-[0.15em] text-white/45 uppercase">
+          Live demo &nbsp;·&nbsp; No signup &nbsp;·&nbsp; Real 6-layer causal traces
         </p>
       </motion.div>
 
@@ -833,10 +867,10 @@ function AnimatedCounter({
 
 function StatsSection() {
   const stats = [
-    { value: 2.4, label: "Traces captured per month", prefix: "", suffix: "M+", decimals: 1 },
-    { value: 1.8, label: "Average root-cause resolution", prefix: "", suffix: "s", decimals: 1, lessThan: true },
-    { value: 6, label: "Causal model layers", prefix: "", suffix: "" },
-    { value: 99.9, label: "Graph assembly accuracy", prefix: "", suffix: "%", decimals: 1 },
+    { value: 6, label: "Causal model layers", prefix: "", suffix: "", decimals: 0 },
+    { value: 4, label: "Auto-link strategies", prefix: "", suffix: "", decimals: 0 },
+    { value: 6, label: "Incident sources ingested", prefix: "", suffix: "", decimals: 0 },
+    { value: 1, label: "Decorator to instrument", prefix: "", suffix: "", decimals: 0 },
   ];
 
   return (
@@ -872,24 +906,16 @@ function StatsSection() {
           viewport={{ once: true, margin: "-60px" }}
           className="grid grid-cols-2 lg:grid-cols-4 gap-[1px] bg-white/[0.06]"
         >
-          {stats.map(({ value, label, prefix, suffix, decimals, lessThan }) => (
+          {stats.map(({ value, label, prefix, suffix, decimals }) => (
             <motion.div
               key={label}
               variants={cardVariant}
               className="bg-black p-10 flex flex-col gap-3 items-center text-center"
             >
               <div className="stat-number flex items-center">
-                {lessThan && (
-                  <span
-                    className="font-mono text-white/45 shrink-0"
-                    style={{ fontSize: "72%", lineHeight: 1, marginRight: "0.08em" }}
-                  >
-                    &lt;
-                  </span>
-                )}
                 <AnimatedCounter value={value} prefix={prefix} suffix={suffix} decimals={decimals} />
               </div>
-              <p className="font-mono text-[11px] tracking-[0.1em] text-white/30 uppercase leading-relaxed">
+              <p className="font-mono text-[11px] tracking-[0.1em] text-white/55 uppercase leading-relaxed">
                 {label}
               </p>
             </motion.div>
@@ -1132,7 +1158,7 @@ function BenefitSection({
   flip?: boolean;
 }) {
   return (
-    <section className="relative min-h-screen flex items-center border-b border-white/[0.06] overflow-hidden" id="product">
+    <section className="relative min-h-screen flex items-center border-b border-white/[0.06] overflow-hidden">
       {/* Giant ghost number */}
       <div
         className="benefit-number absolute pointer-events-none select-none"
@@ -1655,16 +1681,16 @@ function CTASection() {
         </motion.p>
 
         <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <Link href="/incidents" className="xai-btn xai-btn-primary">
-            GET STARTED FREE <ArrowRight className="w-3.5 h-3.5" />
+          <Link href={`/incidents/${FEATURED_INCIDENT_ID}`} className="xai-btn xai-btn-primary">
+            EXPLORE A LIVE INCIDENT <ArrowRight className="w-3.5 h-3.5" />
           </Link>
-          <Link href="#" className="xai-btn">
+          <a href="https://github.com/mitanshubhoot/causal" target="_blank" rel="noreferrer" className="xai-btn">
             READ THE DOCS <ArrowUpRight className="w-3 h-3" />
-          </Link>
+          </a>
         </motion.div>
 
-        <motion.p variants={fadeUp} className="mt-10 font-mono text-[11px] tracking-[0.15em] text-white/15 uppercase">
-          No credit card required &nbsp;·&nbsp; Free tier &nbsp;·&nbsp; Setup in 5 min
+        <motion.p variants={fadeUp} className="mt-10 font-mono text-[11px] tracking-[0.15em] text-white/45 uppercase">
+          Open beta &nbsp;·&nbsp; No signup &nbsp;·&nbsp; Explore real causal traces
         </motion.p>
       </motion.div>
     </section>
@@ -1681,10 +1707,8 @@ function Footer() {
       heading: "PRODUCT",
       links: [
         { label: "Incidents", href: "/incidents" },
-        { label: "Traces", href: "/traces" },
-        { label: "RCA Engine", href: "#" },
-        { label: "MCP Server", href: "#" },
-        { label: "Changelog", href: "#" },
+        { label: "Live Demo", href: `/incidents/${FEATURED_INCIDENT_ID}` },
+        { label: "GitHub", href: "https://github.com/mitanshubhoot/causal" },
       ],
     },
     {
@@ -1768,21 +1792,22 @@ function Footer() {
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-black text-white relative">
-      <StarField />
-      <Nav />
-      <HeroSection />
-      <TickerSection />
-      <StatsSection />
-      <BenefitSections />
-      <TickerSection />
-      <HowItWorksSection />
-      <CausalModelStrip />
-      <FeaturesSection />
-      <IntegrationsSection />
-      <PricingSection />
-      <CTASection />
-      <Footer />
-    </div>
+    <MotionConfig reducedMotion="user">
+      <div className="min-h-screen bg-black text-white relative">
+        <StarField />
+        <Nav />
+        <HeroSection />
+        <TickerSection />
+        <StatsSection />
+        <BenefitSections />
+        <HowItWorksSection />
+        <CausalModelStrip />
+        <FeaturesSection />
+        <IntegrationsSection />
+        <PricingSection />
+        <CTASection />
+        <Footer />
+      </div>
+    </MotionConfig>
   );
 }

@@ -18,8 +18,8 @@ const config: Config = {
         incident:  { DEFAULT: "#dc2626", light: "#fee2e2", border: "#fca5a5" },
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
-        mono: ["JetBrains Mono", "Fira Code", "monospace"],
+        sans: ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
+        mono: ["var(--font-jetbrains)", "ui-monospace", "SFMono-Regular", "monospace"],
       },
     },
   },

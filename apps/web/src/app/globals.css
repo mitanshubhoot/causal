@@ -415,6 +415,32 @@
   }
 }
 
+/* Keyboard focus ring — violet matches the critical-path accent. */
+:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.6);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Honor the OS "reduce motion" setting: kill decorative loops. */
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .ticker-track,
+  .gradient-text,
+  .confidence-assembling {
+    animation: none !important;
+  }
+}
+
 .confidence-assembling {
   animation: confidence-flash 1.5s ease-in-out infinite;
 }

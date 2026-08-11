@@ -3,17 +3,24 @@ import {
   getMockIncidents,
   getMockTrace,
   getMockNode,
+  getMockReplay,
+  getMockPostMortem,
 } from "./mock-data";
 
-const API_BASE = process.env["NEXT_PUBLIC_API_URL"] ?? "http://localhost:3001";
+// Same-origin by default so next.config's /api/v1 rewrite proxies to
+// CAUSAL_API_URL. NEVER default to localhost:3001 — on a deployed site that
+// would fire fetches at the *visitor's* machine.
+const API_BASE = process.env["NEXT_PUBLIC_API_URL"] ?? "";
 const API_KEY = process.env["NEXT_PUBLIC_CAUSAL_API_KEY"] ?? "";
 
-// Demo mode forces all calls to use mock data without even hitting the API.
-// Set NEXT_PUBLIC_DEMO_MODE=1 on Vercel to enable; defaults on when no API URL
-// is configured at all.
+// Demo mode serves mock data without ever hitting the API. Explicitly enabled
+// with NEXT_PUBLIC_DEMO_MODE=1, and — as the deployed demo relies on — it
+// defaults ON whenever no API URL is configured at all, so a cold/absent
+// backend never shows a spinner or a network error.
 const FORCE_DEMO =
   process.env["NEXT_PUBLIC_DEMO_MODE"] === "1" ||
-  process.env["NEXT_PUBLIC_DEMO_MODE"] === "true";
+  process.env["NEXT_PUBLIC_DEMO_MODE"] === "true" ||
+  !process.env["NEXT_PUBLIC_API_URL"];
 
 // Timeout fetch — Vercel/Render cold-starts can hang; if the API doesn't
 // respond within 5s we fall back to mock data so the UI is never blocked.
@@ -124,16 +131,15 @@ export const api = {
       fidelityScore: 0.92,
     })),
 
-  runReplay: (body: unknown) =>
+  runReplay: (body: { snapshotId?: string; rootNodeId?: string }) =>
     apiFetch<ReplayResult>(
       "/api/v1/replay",
       { method: "POST", body: JSON.stringify(body) },
-      () => {
-        throw new Error("Replay requires a live API backend.");
-      }
+      () => getMockReplay(body.rootNodeId ?? body.snapshotId ?? "")
     ),
 
-  // Post-mortem — return a static demo post-mortem so the page renders
+  // Post-mortem — return a rich per-incident demo post-mortem so the page
+  // renders instantly with a real document, not a skeleton.
   generatePostMortem: (body: { traceGraphId?: string; rootNodeId?: string }) =>
     apiFetch<{
       id: string;
@@ -143,16 +149,7 @@ export const api = {
     }>(
       "/api/v1/postmortem",
       { method: "POST", body: JSON.stringify(body) },
-      () => ({
-        id: "demo-postmortem",
-        markdown: buildDemoPostMortem(body.rootNodeId),
-        linearTicket: {
-          title: "Demo post-mortem ticket",
-          description: "This is a demo post-mortem generated locally.",
-        },
-        claudeMdRule:
-          "When implementing tool calls that look up data by key, use dictionary `.get()` with defaults instead of direct key access — gracefully handle missing fields.",
-      })
+      () => getMockPostMortem(body.rootNodeId ?? "")
     ),
 
   // Edge confirmation
@@ -163,25 +160,3 @@ export const api = {
       () => ({ ok: true })
     ),
 };
-
-function buildDemoPostMortem(rootNodeId?: string): string {
-  const tg = rootNodeId ? getMockTrace(rootNodeId) : null;
-  const title =
-    tg && (tg.nodes.find((n) => n.layer === "INCIDENT")?.payload as Record<string, unknown> | undefined)?.["title"];
-  return `# Post-Mortem — ${title ?? "Demo Incident"}
-
-## Summary
-${tg?.rootCauses[0]?.explanation ?? "Demo post-mortem. Connect a live API for AI-generated content."}
-
-## Root Cause
-${tg?.rootCauses[0]?.explanation ?? "n/a"}
-
-## Counterfactual
-${tg?.rootCauses[0]?.counterfactual ?? "n/a"}
-
-## Action Items
-- Add input validation for dictionary keys
-- Add unit tests for missing-field paths
-- Review tool implementations across the codebase for similar patterns
-`;
-}

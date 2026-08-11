@@ -441,30 +441,106 @@ function MetaRow({ label, value, mono = false }: { label: string; value: string;
 }
 
 // ── Root Cause Summary Banner ────────────────────────────────────
-function RootCauseBanner({ rootCauses, nodes }: { rootCauses: RootCause[]; nodes: CausalNode[] }) {
+function RootCauseBanner({
+  rootCauses,
+  nodes,
+  criticalPath,
+  onSelect,
+}: {
+  rootCauses: RootCause[];
+  nodes: CausalNode[];
+  criticalPath: string[];
+  onSelect: (node: CausalNode) => void;
+}) {
+  const [showCounter, setShowCounter] = useState(true);
   const primary = rootCauses[0];
   if (!primary) return null;
   const rcNode = nodes.find(n => n.id === primary.nodeId);
   const rcConfig = LAYER_CONFIG[rcNode?.layer ?? "INCIDENT"] ?? LAYER_CONFIG.INCIDENT!;
+  const color = rcConfig.color;
+  const pct = Math.round(primary.probability * 100);
+
+  // Causal distance: how many hops upstream of the incident the root cause sits.
+  const rcIdx = criticalPath.indexOf(primary.nodeId);
+  const hops = rcIdx >= 0 ? criticalPath.length - 1 - rcIdx : null;
+
+  const secondary = rootCauses.slice(1);
 
   return (
-    <div className="px-6 py-5 border-b border-violet-400/20 bg-violet-500/[0.06] flex-shrink-0">
-      <div className="flex items-center gap-2.5 mb-3">
-        <div className="w-2 h-2 rounded-full bg-violet-400 ring-2 ring-violet-400/30" />
-        <span className="font-mono text-[11px] tracking-[0.18em] text-violet-200 uppercase font-semibold">
+    <div
+      className="px-6 py-5 border-b flex-shrink-0"
+      style={{ borderColor: `${color}30`, background: `${color}0f`, borderLeft: `2px solid ${color}` }}
+    >
+      <div className="flex items-center gap-2.5 mb-2.5">
+        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 0 3px ${color}33` }} />
+        <span className="font-mono text-[10px] tracking-[0.2em] uppercase font-semibold" style={{ color }}>
           Root Cause · {rcConfig.label}
         </span>
-        <span className="font-mono text-[11px] text-violet-300/80 ml-auto font-medium">
-          {Math.round(primary.probability * 100)}% confidence
-        </span>
+        {hops !== null && (
+          <span className="font-mono text-[10px] tracking-[0.1em] text-white/50 uppercase">
+            {hops === 0 ? "at failure" : `${hops} hop${hops === 1 ? "" : "s"} upstream`}
+          </span>
+        )}
+        {/* Confidence meter */}
+        <div className="ml-auto flex items-center gap-2">
+          <div className="w-16 h-1.5 rounded-full bg-white/10 overflow-hidden">
+            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+          </div>
+          <span className="font-mono text-[11px] tabular-nums font-semibold" style={{ color }}>{pct}%</span>
+        </div>
       </div>
-      <p className="text-[14px] text-white/95 leading-relaxed mb-3">{primary.explanation}</p>
+
+      {/* Verdict headline */}
+      <p className="text-[15px] text-white font-medium leading-relaxed mb-1">{primary.explanation}</p>
+
+      {/* Jump to the evidence node */}
+      {rcNode && (
+        <button
+          onClick={() => onSelect(rcNode)}
+          className="inline-flex items-center gap-1 font-mono text-[10px] tracking-[0.12em] uppercase text-white/55 hover:text-white/90 transition-colors mt-1"
+        >
+          View node <ExternalLink className="w-3 h-3" />
+        </button>
+      )}
+
+      {/* Counterfactual (collapsible) */}
       {primary.counterfactual && (
-        <div className="bg-white/[0.04] border border-white/10 rounded-lg p-4 mt-3">
-          <p className="font-mono text-[10px] tracking-[0.15em] text-cyan-300 uppercase mb-1.5 font-semibold">
+        <div className="mt-3">
+          <button
+            onClick={() => setShowCounter(v => !v)}
+            className="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.15em] text-cyan-300 uppercase font-semibold hover:text-cyan-200 transition-colors"
+          >
+            {showCounter ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
             What would have prevented this
-          </p>
-          <p className="text-[13px] text-white/85 leading-relaxed">{primary.counterfactual}</p>
+          </button>
+          {showCounter && (
+            <div className="bg-white/[0.04] border border-white/10 rounded-lg p-4 mt-2">
+              <p className="text-[13px] text-white/85 leading-relaxed">{primary.counterfactual}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Secondary hypotheses */}
+      {secondary.length > 0 && (
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <span className="font-mono text-[10px] tracking-[0.12em] text-white/40 uppercase">
+            {secondary.length} alt hypothes{secondary.length === 1 ? "is" : "es"}:
+          </span>
+          {secondary.map((rc) => {
+            const n = nodes.find(nn => nn.id === rc.nodeId);
+            const cfg = LAYER_CONFIG[n?.layer ?? "INCIDENT"] ?? LAYER_CONFIG.INCIDENT!;
+            return (
+              <button
+                key={rc.nodeId}
+                onClick={() => n && onSelect(n)}
+                className="font-mono text-[10px] tracking-[0.06em] px-2 py-0.5 rounded border transition-colors hover:bg-white/[0.06]"
+                style={{ color: cfg.color, borderColor: `${cfg.color}40` }}
+              >
+                {cfg.label} · {Math.round(rc.probability * 100)}%
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -540,7 +616,12 @@ export function TraceExplorer({ traceGraph }: TraceExplorerProps) {
       {/* Right panel — Root cause banner + detail view */}
       <div className="flex-1 overflow-hidden flex flex-col min-w-0">
         {/* Always-visible root cause summary */}
-        <RootCauseBanner rootCauses={traceGraph.rootCauses} nodes={traceGraph.nodes} />
+        <RootCauseBanner
+          rootCauses={traceGraph.rootCauses}
+          nodes={traceGraph.nodes}
+          criticalPath={traceGraph.criticalPath}
+          onSelect={setSelectedNode}
+        />
 
         {/* Selected node detail */}
         <div className="flex-1 overflow-hidden">
