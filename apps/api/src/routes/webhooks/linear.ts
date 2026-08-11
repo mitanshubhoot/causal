@@ -1,9 +1,27 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { createNode } from "../../services/nodes.js";
 import { populateNodeEmbedding } from "../../services/embeddings.js";
+import { config } from "../../config.js";
+
+function verifyLinearSignature(rawBody: string | undefined, signature: string | undefined): boolean {
+  if (!config.LINEAR_WEBHOOK_SECRET) return true; // dev mode: no secret configured
+  if (!rawBody || !signature) return false;
+  const expected = createHmac("sha256", config.LINEAR_WEBHOOK_SECRET).update(rawBody).digest("hex");
+  const sig = Buffer.from(signature);
+  const exp = Buffer.from(expected);
+  return sig.length === exp.length && timingSafeEqual(sig, exp);
+}
 
 const linearWebhookPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.post("/linear", async (request, reply) => {
+    // Verify the Linear HMAC signature when a secret is configured.
+    const rawBody = (request as { rawBody?: string }).rawBody;
+    const signature = request.headers["linear-signature"] as string | undefined;
+    if (!verifyLinearSignature(rawBody, signature)) {
+      return reply.code(401).send({ error: "Invalid Linear signature" });
+    }
+
     const body = request.body as Record<string, unknown>;
     const action = (body["action"] as string) ?? "";
     const type = (body["type"] as string) ?? "";
@@ -13,7 +31,7 @@ const linearWebhookPlugin: FastifyPluginAsync = async (fastify) => {
       return reply.code(200).send({ ok: true, skipped: true });
     }
 
-    const data = body["data"] as Record<string, unknown>;
+    const data = (body["data"] as Record<string, unknown>) ?? {};
     const issueId = (data["id"] as string) ?? "";
     const identifier = (data["identifier"] as string) ?? issueId; // e.g. LIN-447
     const title = (data["title"] as string) ?? "";
@@ -23,7 +41,9 @@ const linearWebhookPlugin: FastifyPluginAsync = async (fastify) => {
     const teamId = (data["team"] as Record<string, unknown>)?.["id"] as string ?? "";
     const priority = Number(data["priority"] ?? 0);
 
-    const orgId = "default"; // TODO: resolve from Linear team → Causal org mapping
+    // Resolve tenant from an explicit header (set on the per-integration
+    // webhook URL) rather than silently co-mingling into a shared "default" org.
+    const orgId = (request.headers["x-causal-org-id"] as string) || "default";
 
     const specNode = await createNode(fastify, {
       layer: "SPEC",

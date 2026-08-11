@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { Octokit } from "@octokit/rest";
 import { createAppAuth } from "@octokit/auth-app";
 import { config } from "../config.js";
@@ -24,17 +25,18 @@ export function verifyGithubSignature(
 ): boolean {
   if (!config.GITHUB_WEBHOOK_SECRET) return true; // dev mode
 
-  const { createHmac } = require("crypto");
   const expected =
     "sha256=" +
     createHmac("sha256", config.GITHUB_WEBHOOK_SECRET)
       .update(payload)
       .digest("hex");
 
-  // Constant-time comparison
-  if (signature.length !== expected.length) return false;
-  const { timingSafeEqual } = require("crypto");
-  return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  // Constant-time comparison — length-guard first so timingSafeEqual (which
+  // throws RangeError on unequal lengths) can't turn a bad signature into a 500.
+  const sigBuf = Buffer.from(signature);
+  const expBuf = Buffer.from(expected);
+  if (sigBuf.length !== expBuf.length) return false;
+  return timingSafeEqual(sigBuf, expBuf);
 }
 
 // ── Extract session ID from commit message/notes ──────────────────

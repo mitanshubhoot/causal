@@ -43,6 +43,13 @@ def gather_evidence(state: RCAState) -> dict[str, Any]:
     incident_id = state["incident_node_id"]
     org_id = state["org_id"]
 
+    # Prefer the graph the caller already assembled and POSTed — the Fastify API
+    # sends the full nodes/edges it just built. Only fall back to querying Neo4j
+    # directly when the request carried no graph (e.g. a bare /analyze call).
+    posted = state.get("trace_graph") or {}
+    if posted.get("nodes"):
+        return {"trace_graph": posted, "error": None}
+
     driver = get_neo4j()
     with driver.session() as session:
         result = session.run(

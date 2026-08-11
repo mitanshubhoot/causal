@@ -168,6 +168,7 @@ export async function assembleTraceGraph(
     rootCauses = await callRcaService(fastify, {
       traceId,
       rootNodeId,
+      orgId,
       nodes,
       edges,
       candidates: rootCauseCandidates,
@@ -229,6 +230,7 @@ async function fetchAncestorGraph(
     rel: Record<string, unknown>;
     relType: string;
     srcId: string;
+    tgtId: string;
     depth: number;
   }>(
     `MATCH (root:CausalNode {id: $rootNodeId, orgId: $orgId})
@@ -244,7 +246,7 @@ async function fetchAncestorGraph(
           length(path) AS depth
      WHERE rel IS NOT NULL AND rel.weight >= ${minWeight}
      RETURN ancestor, rel, type(rel) AS relType,
-            startNode(rel).id AS srcId, depth
+            startNode(rel).id AS srcId, endNode(rel).id AS tgtId, depth
      ORDER BY depth ASC`,
     { rootNodeId, orgId }
   );
@@ -263,13 +265,17 @@ async function fetchAncestorGraph(
     const node = neo4jToNode(row.ancestor);
     nodeMap.set(node.id, node);
 
-    const rel = row.rel;
+    // row.rel is a driver Relationship instance — its fields live under
+    // `.properties`; reading them off the Relationship directly is undefined.
+    const rel = (row.rel as { properties?: Record<string, unknown> }).properties ?? row.rel;
     const edgeId = rel["id"] as string;
     if (edgeId && !edgeMap.has(edgeId)) {
       edgeMap.set(edgeId, {
         id: edgeId,
         sourceId: row.srcId,
-        targetId: node.id === row.srcId ? rootNodeId : node.id,
+        // Use the relationship's real endpoint, not "everything points at root"
+        // (which flattened multi-hop chains into a star and capped path length).
+        targetId: row.tgtId,
         type: row.relType as CausalEdge["type"],
         weight: Number(rel["weight"]),
         linkStrategy: rel["linkStrategy"] as CausalEdge["linkStrategy"],
@@ -380,6 +386,7 @@ async function callRcaService(
   payload: {
     traceId: string;
     rootNodeId: string;
+    orgId: string;
     nodes: CausalNode[];
     edges: CausalEdge[];
     candidates: Array<{ nodeId: string; layer: string; probability: number; evidenceEdgeIds: string[] }>;

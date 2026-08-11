@@ -39,13 +39,16 @@ function clampConfidence(strategy: LinkStrategy, score: number): number {
     return Math.max(0, Math.min(1, score));
   }
 
-  if (score < bounds.min || score > bounds.max) {
+  if (score > bounds.max) {
     console.warn(
-      `Confidence ${score.toFixed(3)} for strategy "${strategy}" outside expected range [${bounds.min}, ${bounds.max}], clamping`
+      `Confidence ${score.toFixed(3)} for strategy "${strategy}" exceeds max ${bounds.max}, clamping`
     );
   }
 
-  return Math.max(bounds.min, Math.min(bounds.max, score));
+  // Clamp DOWN to the strategy ceiling, but never raise a weak score up to the
+  // floor — doing so would inflate a barely-correlated 0.41 into a confident
+  // 0.60 edge and bypass the isSuggested/human-confirmation safeguard.
+  return Math.max(0, Math.min(bounds.max, score));
 }
 
 // ── Entry point called after any INCIDENT or CODE node is created ─
@@ -113,7 +116,11 @@ async function strategy1_sessionId(
 ): Promise<CausalEdge[]> {
   if (!codeNode.sessionId) return [];
 
-  const rows = await fastify.neo4j.run<{ r: Record<string, unknown> }>(
+  // Find the REASONING node(s) that share this session id. We MATCH here (not
+  // CREATE) and then go through createEdge() so the edge is written to BOTH
+  // Neo4j and the Postgres mirror with a real uuid — the old inline CREATE
+  // wrote Neo4j only and returned sourceId as the literal string "REASONING_ID".
+  const matches = await fastify.neo4j.run<{ reasoningId: string }>(
     `MATCH (reasoning:CausalNode {
        layer: 'REASONING',
        sessionId: $sessionId,
@@ -121,27 +128,31 @@ async function strategy1_sessionId(
      })
      MATCH (code:CausalNode {id: $codeId})
      WHERE NOT (reasoning)-[:PRODUCED]->(code)
-     CREATE (reasoning)-[r:PRODUCED {
-       id: randomUUID(),
-       weight: 0.97,
-       linkStrategy: 'session_id',
-       confirmedBy: null,
-       isSuggested: false,
-       orgId: $orgId,
-       createdAt: $now
-     }]->(code)
-     RETURN r`,
+     RETURN reasoning.id AS reasoningId`,
     {
       sessionId: codeNode.sessionId,
       codeId: codeNode.id,
       orgId: codeNode.orgId,
-      now: Date.now(),
     }
   );
 
-  return rows.map((row) =>
-    neo4jRelToCausalEdge(row.r, "REASONING_ID", codeNode.id, "PRODUCED", "session_id", codeNode.orgId, clampConfidence("session_id", 0.97))
-  );
+  const edges: CausalEdge[] = [];
+  for (const { reasoningId } of matches) {
+    if (!reasoningId) continue;
+    edges.push(
+      await createEdge(fastify, {
+        sourceId: reasoningId,
+        targetId: codeNode.id,
+        type: "PRODUCED",
+        weight: clampConfidence("session_id", 0.97),
+        linkStrategy: "session_id",
+        confirmedBy: null,
+        isSuggested: false,
+        orgId: codeNode.orgId,
+      })
+    );
+  }
+  return edges;
 }
 
 // ── Strategy 2: Time-window + semantic match (confidence: 0.6–0.8) ─
@@ -234,7 +245,9 @@ export async function strategy3_stackTrace(
     );
 
     for (const row of codeNodes) {
-      const codeNodeId = row.n["id"] as string;
+      const codeProps = (row.n as { properties?: Record<string, unknown> }).properties ?? row.n;
+      const codeNodeId = codeProps["id"] as string;
+      if (!codeNodeId) continue;
       const hasLineMatch = frame.lineno !== undefined;
       const confidence = clampConfidence("stack_trace", hasLineMatch ? 0.92 : 0.85);
 
@@ -310,7 +323,8 @@ async function getNodeById(
     { id }
   );
   if (!rows.length) return null;
-  const n = rows[0]!.n;
+  const raw = rows[0]!.n;
+  const n = (raw as { properties?: Record<string, unknown> }).properties ?? raw;
   return {
     id: n["id"] as string,
     layer: n["layer"] as CausalNode["layer"],

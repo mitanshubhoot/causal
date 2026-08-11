@@ -96,7 +96,11 @@ const nodesPlugin: FastifyPluginAsync = async (fastify) => {
     Params: { id: string };
     Querystring: { maxDepth?: string };
   }>("/:id/ancestors", async (request, reply) => {
-    const maxDepth = Math.min(10, parseInt(request.query.maxDepth ?? "6", 10));
+    // Guard against ?maxDepth=abc → parseInt NaN → Cypher "*1..NaN" (500).
+    const parsedDepth = parseInt(request.query.maxDepth ?? "6", 10);
+    const maxDepth = Number.isFinite(parsedDepth)
+      ? Math.min(10, Math.max(1, parsedDepth))
+      : 6;
     const result = await getAncestors(
       fastify,
       request.params.id,

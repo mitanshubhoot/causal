@@ -189,7 +189,11 @@ export async function getAncestors(
   return { nodes: [...nodeMap.values()], edges };
 }
 
-function neo4jNodeToCausalNode(props: Record<string, unknown>): CausalNode {
+function neo4jNodeToCausalNode(raw: Record<string, unknown>): CausalNode {
+  // fastify.neo4j.run returns record.toObject(), so a `RETURN n` gives a driver
+  // Node instance whose fields live under `.properties` — reading them off the
+  // Node directly yields undefined. Unwrap first.
+  const props = (raw as { properties?: Record<string, unknown> }).properties ?? raw;
   return {
     id: props["id"] as string,
     layer: props["layer"] as CausalNode["layer"],

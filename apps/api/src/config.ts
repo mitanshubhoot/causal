@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+// z.coerce.boolean() coerces ANY non-empty string (including "false") to true,
+// so a flag could never be turned off via env. This parses real booleans.
+const boolEnv = (def: boolean) =>
+  z.preprocess((v) => {
+    if (v === undefined || v === "") return def;
+    if (typeof v === "boolean") return v;
+    return ["1", "true", "yes", "on"].includes(String(v).toLowerCase());
+  }, z.boolean());
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   API_PORT: z.coerce.number().default(3001),
@@ -10,8 +19,9 @@ const EnvSchema = z.object({
   NEO4J_USER: z.string().default("neo4j"),
   NEO4J_PASSWORD: z.string().default("causal_dev_password"),
 
-  // Postgres (matches docker-compose.yml)
-  POSTGRES_URL: z.string().default("postgres://causal:causal_dev_password@localhost:5432/causal"),
+  // Postgres — host port 5433 matches docker-compose.yml's "5433:5432" mapping
+  // and seed-demo.ts's default, so the API, seed, and compose all agree.
+  POSTGRES_URL: z.string().default("postgres://causal:causal_dev_password@localhost:5433/causal"),
 
   // Redis
   REDIS_URL: z.string().default("redis://localhost:6379"),
@@ -38,6 +48,9 @@ const EnvSchema = z.object({
   // Integrations
   PAGERDUTY_WEBHOOK_SECRET: z.string().optional(),
   SENTRY_WEBHOOK_SECRET: z.string().optional(),
+  DATADOG_WEBHOOK_SECRET: z.string().optional(),
+  LINEAR_WEBHOOK_SECRET: z.string().optional(),
+  LANGSMITH_WEBHOOK_SECRET: z.string().optional(),
   SLACK_BOT_TOKEN: z.string().optional(),
   SLACK_SIGNING_SECRET: z.string().optional(),
 
@@ -46,8 +59,8 @@ const EnvSchema = z.object({
   APP_URL: z.string().default("http://localhost:3000"),
 
   // Feature flags
-  ENABLE_VECTOR_EMBEDDINGS: z.coerce.boolean().default(false),
-  ENABLE_SLACK_NOTIFICATIONS: z.coerce.boolean().default(true),
+  ENABLE_VECTOR_EMBEDDINGS: boolEnv(false),
+  ENABLE_SLACK_NOTIFICATIONS: boolEnv(true),
   MIN_CONFIDENCE_THRESHOLD: z.coerce.number().default(0.5),
 });
 

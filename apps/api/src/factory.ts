@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
@@ -42,12 +42,35 @@ import langsmithWebhookPlugin from "./routes/webhooks/langsmith.js";
  * not as boot failures.
  */
 export function registerApp(app: FastifyInstance): void {
-  // Core plugins
+  // Core plugins — APP_URL may be a comma-separated list of allowed origins.
+  const corsOrigins = (process.env["APP_URL"] ?? "http://localhost:3000")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
   app.register(cors, {
-    origin: process.env["APP_URL"] ?? "http://localhost:3000",
+    origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
     credentials: true,
   });
   app.register(sensible);
+
+  // Capture the raw request body for webhook HMAC verification. The webhook
+  // handlers read `request.rawBody`; without this parser it was always
+  // undefined, so createHmac().update(undefined) threw on every signed
+  // delivery. Still parses JSON exactly as before.
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (req: FastifyRequest, body: string, done: (err: Error | null, body?: unknown) => void) => {
+      (req as FastifyRequest & { rawBody?: string }).rawBody = body;
+      if (body === undefined || body === "") return done(null, undefined);
+      try {
+        done(null, JSON.parse(body));
+      } catch (err) {
+        (err as Error & { statusCode?: number }).statusCode = 400;
+        done(err as Error);
+      }
+    }
+  );
 
   // Infrastructure plugins (lazy DB connections inside)
   app.register(neo4jPlugin);
@@ -58,13 +81,9 @@ export function registerApp(app: FastifyInstance): void {
   // Auth
   app.register(authPlugin);
 
-  // Health checks (no auth)
-  app.get("/health", async () => ({
-    status: "ok",
-    version: "0.1.0",
-    timestamp: Date.now(),
-  }));
-
+  // NOTE: the plain `/health` route lives in index.ts (registered before this
+  // deferred plugin). Re-registering it here caused FST_ERR_DUPLICATED_ROUTE,
+  // which made ready() reject and left the whole API unbootable.
   app.get("/api/v1/health", async () => {
     const start = Date.now();
     const services: Record<string, { status: string; latencyMs?: number; error?: string }> = {};

@@ -17,7 +17,10 @@ const datadogWebhookPlugin: FastifyPluginAsync = async (fastify) => {
         .update(rawBody)
         .digest("hex");
 
-      if (!signature || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+      const sigBuf = Buffer.from(signature ?? "");
+      const expBuf = Buffer.from(expected);
+      // Length-guard before timingSafeEqual, which throws on unequal lengths.
+      if (!signature || sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
         return reply.code(401).send({ error: "Invalid Datadog signature" });
       }
     }

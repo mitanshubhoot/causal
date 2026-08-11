@@ -11,12 +11,29 @@
  * link to CODE nodes with weight 0.97 (same as MCP server).
  */
 
+import { timingSafeEqual } from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { createNode } from "../../services/nodes.js";
 import { runAutoLinkPipeline } from "../../services/autolink.js";
+import { config } from "../../config.js";
+
+// LangSmith doesn't sign payloads; gate on a shared secret sent as a header
+// on the per-integration webhook URL when one is configured.
+function verifyLangsmithSecret(provided: string | undefined): boolean {
+  if (!config.LANGSMITH_WEBHOOK_SECRET) return true; // dev mode
+  if (!provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(config.LANGSMITH_WEBHOOK_SECRET);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 const langsmithWebhookPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.post("/langsmith", async (request, reply) => {
+    const provided = request.headers["x-webhook-secret"] as string | undefined;
+    if (!verifyLangsmithSecret(provided)) {
+      return reply.code(401).send({ error: "Invalid webhook secret" });
+    }
+
     const body = request.body as Record<string, unknown>;
     const event = (body["event"] as string) ?? "";
 
@@ -57,7 +74,7 @@ const langsmithWebhookPlugin: FastifyPluginAsync = async (fastify) => {
 
     // Resolve project → orgId
     const projectName = (run["project_name"] as string) ?? "default";
-    const orgId = "default"; // TODO: resolve from LangSmith project config
+    const orgId = (request.headers["x-causal-org-id"] as string) || "default";
 
     const reasoningNode = await createNode(fastify, {
       layer: "REASONING",

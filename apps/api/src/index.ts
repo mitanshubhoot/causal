@@ -39,14 +39,21 @@ const app = Fastify({
 // can read it via curl. Vercel's FUNCTION_INVOCATION_FAILED page eats
 // stack traces, and the runtime log MCP truncates messages to ~30
 // chars, so explicit JSON errors are the most reliable diagnostic.
-app.setErrorHandler((error: Error & { code?: string }, _request, reply) => {
-  console.error(`[err] ${new Date().toISOString()}`, {
-    name: error.name,
-    message: error.message,
-    code: error.code,
-    stack: error.stack,
-  });
-  reply.status(500).send({
+app.setErrorHandler((error: Error & { code?: string; statusCode?: number }, _request, reply) => {
+  // Honor the status @fastify/sensible (reply.notFound/badRequest/…) attached,
+  // and map schema-validation errors to 400 — otherwise every 404/400/422 was
+  // being flattened to 500, so clients couldn't tell "not found" from "broken".
+  const isZod = error.name === "ZodError";
+  const status = error.statusCode ?? (isZod ? 400 : 500);
+  if (status >= 500) {
+    console.error(`[err] ${new Date().toISOString()}`, {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
+  }
+  reply.status(status).send({
     error: error.name,
     message: error.message,
     code: error.code,

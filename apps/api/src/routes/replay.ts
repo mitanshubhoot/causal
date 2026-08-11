@@ -31,7 +31,7 @@ const replayPlugin: FastifyPluginAsync = async (fastify) => {
     const meta = metaRows[0]!;
 
     // 2. Fetch full snapshot from S3
-    const snapshot = await fastify.s3.getSnapshot(meta["s3Key"] as string);
+    const snapshot = await fastify.s3.getSnapshot(meta["s3_key"] as string);
 
     // 3. Compute fidelity score
     const fidelity = computeFidelityScore(snapshot, body.modelOverride);
@@ -98,22 +98,22 @@ const replayPlugin: FastifyPluginAsync = async (fastify) => {
     if (!metaRows.length) return reply.notFound();
     const meta = metaRows[0]!;
 
-    const snapshot = await fastify.s3.getSnapshot(meta["s3Key"] as string);
+    const snapshot = await fastify.s3.getSnapshot(meta["s3_key"] as string);
     return snapshot;
   });
 
   // GET /api/v1/replay/:id/fidelity — fidelity score without running replay
-  fastify.get<{ Params: { id: string } }>("/fidelity/:snapshotId", async (request, reply) => {
+  fastify.get<{ Params: { snapshotId: string } }>("/fidelity/:snapshotId", async (request, reply) => {
     const metaRows = await fastify.pg`
       SELECT s.*, n.org_id FROM snapshot_meta s
       JOIN causal_nodes n ON n.id = s.node_id
-      WHERE s.snapshot_id = ${request.params.id}
+      WHERE s.snapshot_id = ${request.params.snapshotId}
         AND n.org_id = ${request.authUser.orgId}
     ` as Array<Record<string, unknown>>;
 
     if (!metaRows.length) return reply.notFound();
     const meta = metaRows[0]!;
-    const snapshot = await fastify.s3.getSnapshot(meta["s3Key"] as string);
+    const snapshot = await fastify.s3.getSnapshot(meta["s3_key"] as string);
 
     return computeFidelityScore(snapshot, undefined);
   });

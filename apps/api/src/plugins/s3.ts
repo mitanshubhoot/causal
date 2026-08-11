@@ -83,10 +83,11 @@ const s3Plugin: FastifyPluginAsync = async (fastify) => {
     const body = await res.Body.transformToString();
     const snapshot = JSON.parse(body) as ContextSnapshot;
 
-    // Verify integrity
+    // Verify integrity. Hash the snapshot WITHOUT its own contentHash field —
+    // including the hash in its own input can never match what was stored.
     const { contentHash, ...rest } = snapshot;
     const computed = createHash("sha256")
-      .update(JSON.stringify({ ...rest, contentHash }))
+      .update(JSON.stringify(rest))
       .digest("hex");
 
     if (computed !== contentHash) {
