@@ -3,6 +3,10 @@
 import React, { useEffect, useRef } from "react";
 import Link from "next/link";
 import { FEATURED_INCIDENT_ID } from "@/lib/mock-data";
+import { ScrambleText } from "@/components/ScrambleText";
+import { LandingTraceDemo } from "@/components/LandingTraceDemo";
+import { FailureTicker } from "@/components/FailureTicker";
+import { MagneticButton } from "@/components/MagneticButton";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -142,13 +146,20 @@ function Nav() {
 
   const { scrollYProgress } = useScroll();
   const scaleX = useSpring(scrollYProgress, { stiffness: 100, damping: 30, restDelta: 0.001 });
+  // The 1px rail bleeds through the six layer accents in order — scrolling the
+  // site literally descends the causal model INTENT→…→INCIDENT.
+  const railColor = useTransform(
+    scrollYProgress,
+    [0, 0.2, 0.4, 0.6, 0.8, 1],
+    ["#7c3aed", "#2563eb", "#0891b2", "#059669", "#d97706", "#dc2626"]
+  );
 
   return (
     <>
       {/* Scroll progress bar */}
       <motion.div
         className="scroll-progress"
-        style={{ scaleX, width: "100%" }}
+        style={{ scaleX, backgroundColor: railColor, width: "100%" }}
       />
 
       <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-md bg-black/60 border-b border-white/[0.06]">
@@ -220,7 +231,18 @@ function CausalGraphBackground() {
     };
 
     const layerX = [0.08, 0.22, 0.38, 0.55, 0.70, 0.84];
-    const LAYER_LABELS = ["INTENT", "SPEC", "INFERENCE", "LOGIC", "STATE", "FAILURE"];
+    // The real six-layer causal model — must match the product (was lying with
+    // INFERENCE/LOGIC/STATE/FAILURE).
+    const LAYER_LABELS = ["INTENT", "SPEC", "REASONING", "CODE", "EXECUTION", "INCIDENT"];
+    // Real per-layer accents (LAYER_CONFIG / tailwind tokens), as rgb triples.
+    const LAYER_RGB = [
+      "124,58,237",  // INTENT   violet
+      "37,99,235",   // SPEC     blue
+      "8,145,178",   // REASONING cyan (the root-cause layer for the demo incident)
+      "5,150,105",   // CODE     green
+      "217,119,6",   // EXECUTION amber
+      "220,38,38",   // INCIDENT red
+    ];
 
     type NodeType = "start" | "normal" | "failure";
     interface GraphNode {
@@ -348,9 +370,10 @@ function CausalGraphBackground() {
       ctx.textAlign = "center";
       for (let li = 0; li < layerX.length; li++) {
         const lx = (layerX[li] + mx) * W;
-        const isF = li === 5;
         ctx.font = `600 ${10 * DPR}px ui-monospace, "SF Mono", monospace`;
-        ctx.fillStyle = isF ? `rgba(255,120,100,0.55)` : `rgba(255,255,255,0.2)`;
+        // Tint each column label with its real layer accent; incident brighter.
+        const alpha = li === 5 ? 0.6 : 0.42;
+        ctx.fillStyle = `rgba(${LAYER_RGB[li]},${alpha})`;
         ctx.fillText(LAYER_LABELS[li], lx, 46 * DPR);
       }
       ctx.restore();
@@ -716,9 +739,11 @@ function HeroSection() {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.8, delay: 0.1 }}
       >
-        <span className="font-mono text-[11px] tracking-[0.3em] text-white/25 uppercase">
-          Causal &nbsp;·&nbsp; Root Cause Intelligence
-        </span>
+        <ScrambleText
+          text="Causal · Root Cause Intelligence"
+          className="font-mono text-[11px] tracking-[0.3em] text-white/45 uppercase"
+          duration={900}
+        />
       </motion.div>
 
       {/* Main statement — fills the screen */}
@@ -773,12 +798,16 @@ function HeroSection() {
         transition={{ duration: 0.9, delay: 1.9, ease: EASE_OUT }}
       >
         <div className="flex flex-col sm:flex-row items-start gap-4">
-          <Link href={`/incidents/${FEATURED_INCIDENT_ID}`} className="xai-btn xai-btn-primary">
-            EXPLORE A LIVE INCIDENT <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
-          <Link href="/incidents" className="xai-btn">
-            BROWSE ALL INCIDENTS <ExternalLink className="w-3 h-3" />
-          </Link>
+          <MagneticButton>
+            <Link href={`/incidents/${FEATURED_INCIDENT_ID}`} className="xai-btn xai-btn-primary">
+              EXPLORE A LIVE INCIDENT <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </MagneticButton>
+          <MagneticButton>
+            <Link href="/incidents" className="xai-btn">
+              BROWSE ALL INCIDENTS <ExternalLink className="w-3 h-3" />
+            </Link>
+          </MagneticButton>
         </div>
         <p className="mt-5 font-mono text-[11px] tracking-[0.15em] text-white/45 uppercase">
           Live demo &nbsp;·&nbsp; No signup &nbsp;·&nbsp; Real 6-layer causal traces
@@ -800,31 +829,6 @@ function HeroSection() {
         </div>
       </motion.div>
     </section>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TICKER — horizontal marquee
-// ─────────────────────────────────────────────────────────────────────────────
-
-function TickerSection() {
-  const words = ["TRACE", "DIAGNOSE", "RESOLVE", "UNDERSTAND", "PREVENT", "INSTRUMENT", "ANALYSE", "REMEDIATE"];
-  const repeated = [...words, ...words]; // double for seamless loop
-
-  return (
-    <div className="relative py-6 border-y border-white/[0.06] overflow-hidden bg-black/40">
-      <div className="flex ticker-track" style={{ width: "max-content" }}>
-        {repeated.map((word, i) => (
-          <span
-            key={i}
-            className="font-mono text-[11px] tracking-[0.3em] text-white/20 uppercase whitespace-nowrap px-8"
-          >
-            {word}
-            <span className="ml-8 opacity-40">·</span>
-          </span>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -891,8 +895,8 @@ function StatsSection() {
           viewport={{ once: true, margin: "-80px" }}
           className="mb-24 text-center"
         >
-          <motion.p variants={fadeUp} className="font-mono text-[11px] tracking-[0.25em] text-white/30 uppercase mb-5">
-            [ BY THE NUMBERS ]
+          <motion.p variants={fadeUp} className="mb-5">
+            <ScrambleText text="[ BY THE NUMBERS ]" className="font-mono text-[11px] tracking-[0.25em] text-white/45 uppercase" />
           </motion.p>
           <motion.h2 variants={fadeUp} className="text-[40px] sm:text-[56px] font-light tracking-[-0.03em] text-white">
             Built for production-scale AI
@@ -934,10 +938,10 @@ function BenefitDagVisual() {
   const layers = [
     { label: "Intent", x: 80, nodes: [{ y: 280 }] },
     { label: "Spec", x: 230, nodes: [{ y: 200 }, { y: 360 }] },
-    { label: "Inference", x: 410, nodes: [{ y: 150 }, { y: 280 }, { y: 420 }] },
-    { label: "Logic", x: 580, nodes: [{ y: 190 }, { y: 330 }, { y: 460 }] },
-    { label: "State", x: 740, nodes: [{ y: 240 }, { y: 380 }] },
-    { label: "Failure", x: 920, nodes: [{ y: 310 }] },
+    { label: "Reasoning", x: 410, nodes: [{ y: 150 }, { y: 280 }, { y: 420 }] },
+    { label: "Code", x: 580, nodes: [{ y: 190 }, { y: 330 }, { y: 460 }] },
+    { label: "Execution", x: 740, nodes: [{ y: 240 }, { y: 380 }] },
+    { label: "Incident", x: 920, nodes: [{ y: 310 }] },
   ];
 
   const edges: { x1: number; y1: number; x2: number; y2: number; delay: number }[] = [];
@@ -998,7 +1002,7 @@ function BenefitDagVisual() {
         ))}
         {layers.map(({ label, x, nodes }, li) =>
           nodes.map((node, ni) => {
-            const isFailure = label === "Failure";
+            const isFailure = label === "Incident";
             const isIntent = label === "Intent";
             const size = isFailure ? 9 : isIntent ? 8 : 5;
             return (
@@ -1275,7 +1279,7 @@ function HowItWorksSection() {
       icon: GitBranch,
       title: "Graph Propagation",
       description: "Every execution trace populates a deterministic Neo4j knowledge graph linking the initial spec, inference steps, tool decisions, and terminal failure states.",
-      code: `# Causal structural mapping:\n# INTENT → SPEC → INFERENCE\n# → LOGIC → STATE → FAILURE`,
+      code: `# Causal structural mapping:\n# INTENT → SPEC → REASONING\n# → CODE → EXECUTION → INCIDENT`,
     },
     {
       num: "03",
@@ -1303,8 +1307,8 @@ function HowItWorksSection() {
           viewport={{ once: true, margin: "-80px" }}
           className="mb-20"
         >
-          <motion.p variants={fadeUp} className="font-mono text-[11px] tracking-[0.2em] text-white/30 uppercase mb-4">
-            [ METHODOLOGY ]
+          <motion.p variants={fadeUp} className="mb-4">
+            <ScrambleText text="[ METHODOLOGY ]" className="font-mono text-[11px] tracking-[0.2em] text-white/45 uppercase" />
           </motion.p>
           <motion.h2 variants={fadeUp} className="text-[36px] sm:text-[48px] font-light tracking-[-0.03em] text-white">
             Continuous Causal Inference
@@ -1349,12 +1353,12 @@ function HowItWorksSection() {
 
 function CausalModelStrip() {
   const layers = [
-    { label: "INTENT" },
-    { label: "SPEC" },
-    { label: "INFERENCE" },
-    { label: "LOGIC" },
-    { label: "STATE" },
-    { label: "FAILURE" },
+    { label: "INTENT", color: "#7c3aed" },
+    { label: "SPEC", color: "#2563eb" },
+    { label: "REASONING", color: "#0891b2" },
+    { label: "CODE", color: "#059669" },
+    { label: "EXECUTION", color: "#d97706" },
+    { label: "INCIDENT", color: "#dc2626" },
   ];
 
   return (
@@ -1377,12 +1381,15 @@ function CausalModelStrip() {
             viewport={{ once: true }}
             className="flex flex-wrap justify-center items-center gap-3 sm:gap-5 mb-10 w-full"
           >
-            {layers.map(({ label }, i) => (
+            {layers.map(({ label, color }, i) => (
               <motion.div key={label} variants={cardVariant} className="flex items-center gap-3 sm:gap-5">
-                <span className="font-mono text-[11px] tracking-[0.15em] border border-white/10 text-white/40 px-5 py-2.5 rounded-full">
+                <span
+                  className="font-mono text-[11px] tracking-[0.15em] border px-5 py-2.5 rounded-full"
+                  style={{ color, borderColor: `${color}55`, backgroundColor: `${color}10` }}
+                >
                   {label}
                 </span>
-                {i < layers.length - 1 && <span className="text-white/15">→</span>}
+                {i < layers.length - 1 && <span className="text-white/25">→</span>}
               </motion.div>
             ))}
           </motion.div>
@@ -1797,7 +1804,8 @@ export default function HomePage() {
         <StarField />
         <Nav />
         <HeroSection />
-        <TickerSection />
+        <FailureTicker />
+        <LandingTraceDemo />
         <StatsSection />
         <BenefitSections />
         <HowItWorksSection />
