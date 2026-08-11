@@ -75,16 +75,33 @@ causal init   # installs .git/hooks/post-commit
 
 ## Claude Code Integration (MCP Server)
 
-Add to your `CLAUDE.md` or `.claude/settings.json`:
+The MCP server ships in this repo (`packages/mcp-server`). Build it, then add it
+to your project's `.mcp.json` (Claude Code reads JSON, not TOML):
 
-```toml
-[[mcp_servers]]
-name = "causal"
-command = "npx"
-args = ["causal-mcp", "--org", "YOUR_ORG_ID", "--api-key", "YOUR_API_KEY"]
+```bash
+pnpm --filter causal-mcp build
+```
+
+```jsonc
+// .mcp.json
+{
+  "mcpServers": {
+    "causal": {
+      "command": "node",
+      "args": [
+        "packages/mcp-server/dist/index.js",
+        "--org", "YOUR_ORG_ID",
+        "--api-key", "YOUR_API_KEY"
+      ]
+    }
+  }
+}
 ```
 
 Now every Claude Code session auto-creates a REASONING node. Every commit auto-links to it via session ID. When an incident fires, Causal traces the full chain.
+
+> The package is not yet published to npm, so use the local `dist` path above
+> rather than `npx causal-mcp`.
 
 ## LangGraph Integration
 
@@ -96,9 +113,12 @@ from causal_sdk.integrations.langgraph import CausalLangGraphCallback
 
 client = CausalClient(api_key="...", org_id="...")
 
-app = graph.compile(
-    checkpointer=MemorySaver(),
-    callbacks=[CausalLangGraphCallback(client=client, spec_id="LIN-447")]
+app = graph.compile(checkpointer=MemorySaver())
+
+# Callbacks are passed at invoke time (LangGraph's compile() has no callbacks arg):
+app.invoke(
+    initial_state,
+    config={"callbacks": [CausalLangGraphCallback(client=client, spec_id="LIN-447")]},
 )
 ```
 
@@ -154,13 +174,13 @@ causal/
 
 ## Tech Stack
 
-- **API**: Fastify + TypeScript + Node.js 20
-- **Graph DB**: Neo4j (Cypher ancestor traversal)
+- **API**: Fastify 5 + TypeScript + Node.js 22
+- **Graph DB**: Neo4j (Cypher ancestor traversal, APOC)
 - **Time-series + Vector**: PostgreSQL 16 + TimescaleDB + pgvector
 - **Object Storage**: S3-compatible (MinIO for local dev)
-- **RCA Engine**: LangGraph StateGraph (Python)
+- **RCA Engine**: LangGraph StateGraph (Python, local-only)
 - **LLM**: Claude claude-sonnet-4-6 (Anthropic API)
 - **Embeddings**: OpenAI text-embedding-3-small (1536 dims)
-- **Queue**: Redis Streams
+- **Background work**: in-process (`setImmediate`) — no external queue yet
 - **Frontend**: Next.js 14 + react-flow + Tailwind CSS
-- **Auth**: Clerk
+- **Auth**: Bearer API keys (SHA-256 hashed) + a public demo key
