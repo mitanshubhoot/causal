@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from "react";
 import Link from "next/link";
 import { FEATURED_INCIDENT_ID } from "@/lib/mock-data";
+import { getDatasets, getRuns } from "@/lib/mock-evals";
 import { ScrambleText } from "@/components/ScrambleText";
 import { LandingTraceDemo } from "@/components/LandingTraceDemo";
 import { FailureTicker } from "@/components/FailureTicker";
@@ -1154,6 +1155,92 @@ function BenefitPostmortemVisual() {
   );
 }
 
+/**
+ * The eval loop, shown rather than asserted — a real golden set from the demo
+ * data, its per-case verdicts, and the score climbing release over release.
+ * Reads from the same module the product does, so the landing page can never
+ * drift from what /evals actually shows.
+ */
+function BenefitEvalVisual() {
+  const dataset = getDatasets()[0]!;
+  const runs = getRuns(dataset.id).slice(0, 3);
+  const latest = runs[0]!;
+  const cases = dataset.items.slice(0, 4);
+
+  return (
+    <div className="w-full rounded-xl border border-white/[0.08] overflow-hidden">
+      <div className="bg-white/[0.02] border-b border-white/[0.06] px-5 py-3 flex items-center justify-between">
+        <span className="font-mono text-[11px] text-white/25 tracking-wider">
+          GOLDEN SET · {dataset.name.toUpperCase()}
+        </span>
+        <span className="font-mono text-[10px] text-emerald-400/70 tracking-wider">
+          {Math.round(latest.score * 100)}% · {latest.passed}/{latest.total}
+        </span>
+      </div>
+
+      <div className="bg-black p-5">
+        {/* Score per release — the trend is the product's promise. */}
+        <p className="font-mono text-[10px] tracking-[0.2em] text-white/25 uppercase mb-3">
+          Score by release
+        </p>
+        <div className="flex items-end gap-2 mb-6">
+          {[...runs].reverse().map((r) => (
+            <div key={r.id} className="flex-1 flex flex-col items-center gap-2">
+              <div className="w-full h-20 flex items-end">
+                <motion.div
+                  initial={{ height: 0 }}
+                  whileInView={{ height: `${Math.max(r.score * 100, 6)}%` }}
+                  transition={{ duration: 0.9, ease: EASE_OUT }}
+                  viewport={{ once: true }}
+                  className={`w-full rounded-t ${
+                    r.score === 1 ? "bg-emerald-400/30" : r.score >= 0.6 ? "bg-amber-400/25" : "bg-red-400/25"
+                  }`}
+                />
+              </div>
+              <span className="font-mono text-[10px] text-white/40 tabular-nums">
+                {Math.round(r.score * 100)}%
+              </span>
+              <span className="font-mono text-[9px] text-white/20 text-center leading-tight">
+                {r.release.replace(/^[a-z-]+-/, "")}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div className="glow-line mb-4" />
+
+        {/* Cases, with the assertions that make a verdict checkable. */}
+        <p className="font-mono text-[10px] tracking-[0.2em] text-white/25 uppercase mb-3">
+          Cases · {latest.release}
+        </p>
+        <div className="space-y-2">
+          {cases.map((item) => {
+            const res = latest.results.find((r) => r.itemId === item.id);
+            return (
+              <div key={item.id} className="flex items-start gap-2.5">
+                {res?.passed ? (
+                  <Check className="w-3 h-3 text-emerald-400/80 mt-0.5 shrink-0" />
+                ) : (
+                  <span className="w-3 h-3 mt-0.5 shrink-0 font-mono text-[11px] text-red-400/80 leading-none">✕</span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[12px] text-white/45 truncate">{item.title}</span>
+                  <span className="block font-mono text-[10px] text-white/20">
+                    {item.assertions.length} assertions · {item.difficulty}
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+          <p className="font-mono text-[10px] text-white/20 pt-1">
+            +{dataset.items.length - cases.length} more cases
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BenefitSection({
   num,
   tag,
@@ -1277,9 +1364,9 @@ function BenefitSections() {
         headline={"Every fix,\nverified —\nand kept fixed."}
         sub="A confirmed failure becomes a golden case in one click. Every release is re-run against the whole set, so a fix is proven and a regression can't quietly come back."
         body="Online detection and offline evaluation in one loop — run from the CLI or from inside Claude Code, Cursor, or Codex. Release over release, your agent gets measurably more robust."
-        cta="SEE THE EVAL LOOP"
-        ctaHref={`/incidents/${FEATURED_INCIDENT_ID}`}
-        visual={<BenefitDagVisual />}
+        cta="OPEN THE EVAL SETS"
+        ctaHref="/evals"
+        visual={<BenefitEvalVisual />}
         flip
       />
     </>
@@ -1461,19 +1548,22 @@ function CausalModelStrip() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function FeaturesSection() {
+  // Every claim links to where it can actually be seen in the demo. A feature
+  // grid that only asserts is a feature grid nobody believes.
+  const incident = `/incidents/${FEATURED_INCIDENT_ID}`;
   const features = [
-    { icon: Activity, title: "Trace tree + timeline", description: "Every run rendered as a correlated trace tree and timeline. Drill from the top-level agent step down to the raw LLM and tool call." },
-    { icon: GitBranch, title: "Git-linked spans", description: "Every span carries the file, line, and commit that produced it — so a failure is one click from the code that caused it." },
-    { icon: Search, title: "Signal, not noise", description: "Traces are scored on error, latency, cost, retry loops and whether a failure is actionable. The ones that matter surface; the rest are sampled away." },
-    { icon: Shield, title: "LLM-as-judge detectors", description: "Continuous evaluation for hallucination, tool and logic failures, intent drift, and safety violations — scored on every trace, not just the ones that already errored." },
-    { icon: Cpu, title: "Agentic RCA", description: "An AI agent works in a sandbox with your source: real git blame and pickaxe to find the commit that introduced the failure, explained with a counterfactual." },
-    { icon: GitBranch, title: "Commits, PRs and issues", description: "A failure is correlated not just to the commit but to the pull request that shipped it, the issues it closed, and open issues that already describe it." },
-    { icon: Code2, title: "Verified fix PRs", description: "Causal writes the fix and opens a pull request — diff, description, and a causal-replay check that runs your tests against the patch before claiming it's resolved." },
-    { icon: Zap, title: "Causal Copilot", description: "Ask any trace a question — why did this fail, what's the fix, where did the cost go. Answers grounded in your spans, RCA and git history." },
-    { icon: Database, title: "Datasets & evals", description: "Turn a production finding into a golden case in one click, then re-run every release against it — so a fix is verified and a regression can't come back unnoticed." },
-    { icon: FileText, title: "Token & cost accounting", description: "Tokens and spend recorded per span and rolled up through every parent, so you can see exactly which agent step, retry, or sub-agent burned the budget." },
+    { icon: Activity, title: "Trace tree + timeline", description: "Every run rendered as a correlated trace tree and timeline. Drill from the top-level agent step down to the raw LLM and tool call.", href: incident, see: "Open a trace" },
+    { icon: GitBranch, title: "Git-linked spans", description: "Every span carries the file, line, and commit that produced it — so a failure is one click from the code that caused it.", href: incident, see: "See a git-linked span" },
+    { icon: Search, title: "Signal, not noise", description: "Traces are scored on error, latency, cost, retry loops and whether a failure is actionable. The ones that matter surface; the rest are sampled away.", href: "/incidents", see: "Browse incidents" },
+    { icon: Shield, title: "LLM-as-judge detectors", description: "Continuous evaluation for hallucination, tool and logic failures, intent drift, and safety violations — scored on every trace, not just the ones that already errored.", href: "/detectors", see: "See the detectors" },
+    { icon: Cpu, title: "Agentic RCA", description: "An AI agent works in a sandbox with your source: real git blame and pickaxe to find the commit that introduced the failure, explained with a counterfactual.", href: incident, see: "Read an RCA" },
+    { icon: GitBranch, title: "Commits, PRs and issues", description: "A failure is correlated not just to the commit but to the pull request that shipped it, the issues it closed, and open issues that already describe it.", href: incident, see: "See the correlation" },
+    { icon: Code2, title: "Verified fix PRs", description: "Causal writes the fix and opens a pull request — diff, description, and a causal-replay check that runs your tests against the patch before claiming it's resolved.", href: incident, see: "Open a fix PR" },
+    { icon: Zap, title: "Causal Copilot", description: "Ask any trace a question — why did this fail, what's the fix, where did the cost go. Answers grounded in your spans, RCA and git history.", href: incident, see: "Ask the Copilot" },
+    { icon: Database, title: "Datasets & evals", description: "Turn a production finding into a golden case in one click, then re-run every release against it — so a fix is verified and a regression can't come back unnoticed.", href: "/evals", see: "Open the eval sets" },
+    { icon: FileText, title: "Token & cost accounting", description: "Tokens and spend recorded per span and rolled up through every parent, so you can see exactly which agent step, retry, or sub-agent burned the budget.", href: "/dashboard", see: "See the rollups" },
     { icon: Shield, title: "Bring your own model", description: "Anthropic, OpenAI, Gemini, xAI, DeepSeek, OpenRouter, Kimi, GLM or Bedrock — per workspace, per purpose. Keys are encrypted at rest and never leave your org." },
-    { icon: Webhook, title: "Built for your stack", description: "OpenTelemetry-based SDKs with adapters for LangGraph, CrewAI, LlamaIndex, OpenAI Agents, Vercel AI, and Claude Agent SDK. GitHub, Slack, and email included." },
+    { icon: Webhook, title: "Built for your stack", description: "OpenTelemetry-based SDKs with adapters for LangGraph, CrewAI, LlamaIndex, OpenAI Agents, Vercel AI, and Claude Agent SDK. GitHub, Slack, and email included.", href: "#integrations", see: "See integrations" },
   ];
 
   return (
@@ -1501,15 +1591,35 @@ function FeaturesSection() {
           viewport={{ once: true, margin: "-60px" }}
           className="grid grid-cols-1 lg:grid-cols-3 gap-[1px] bg-white/[0.06]"
         >
-          {features.map(({ icon: Icon, title, description }) => (
-            <motion.div key={title} variants={cardVariant} className="xai-card bg-black p-8">
-              <div className="w-10 h-10 rounded-full border border-white/[0.08] flex items-center justify-center mb-5">
-                <Icon className="w-4 h-4 text-white/40" />
-              </div>
-              <h3 className="text-[15px] font-medium text-white mb-2">{title}</h3>
-              <p className="text-[13px] text-white/25 leading-relaxed">{description}</p>
-            </motion.div>
-          ))}
+          {features.map(({ icon: Icon, title, description, href, see }) => {
+            const inner = (
+              <>
+                <div className="w-10 h-10 rounded-full border border-white/[0.08] flex items-center justify-center mb-5 group-hover:border-white/25 transition-colors">
+                  <Icon className="w-4 h-4 text-white/40 group-hover:text-white/70 transition-colors" />
+                </div>
+                <h3 className="text-[15px] font-medium text-white mb-2">{title}</h3>
+                <p className="text-[13px] text-white/25 leading-relaxed">{description}</p>
+                {see && (
+                  <span className="inline-flex items-center gap-1 mt-4 font-mono text-[10px] tracking-[0.14em] uppercase text-white/25 group-hover:text-white/70 transition-colors">
+                    {see} <ArrowUpRight className="w-3 h-3" />
+                  </span>
+                )}
+              </>
+            );
+            return (
+              <motion.div
+                key={title}
+                variants={cardVariant}
+                className="xai-card bg-black group hover:bg-white/[0.02] transition-colors"
+              >
+                {href ? (
+                  <Link href={href} className="block p-8">{inner}</Link>
+                ) : (
+                  <div className="p-8">{inner}</div>
+                )}
+              </motion.div>
+            );
+          })}
         </motion.div>
       </div>
     </section>
