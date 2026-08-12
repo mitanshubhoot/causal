@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
 import type { ObservabilityDemo } from "@/lib/mock-observability";
+import { askCopilot, LIVE_TRACES } from "@/lib/traces-api";
 import { DETECTOR_LABEL, fmtDuration, fmtTokens } from "./ui";
 import { Sparkles, GitPullRequest, Waypoints, FileText, ArrowUp } from "lucide-react";
 
@@ -133,12 +134,27 @@ ${demo.fixPr ? `${demo.fixPr.description}\n\n→ **PR #${demo.fixPr.number}** (\
 
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [draft, setDraft] = useState("");
+  const [thinking, setThinking] = useState(false);
 
   const ask = (q: string) => {
     const question = q.trim();
-    if (!question) return;
-    setMsgs((m) => [...m, { role: "user", text: question }, { role: "assistant", text: answerFor(question, demo) }]);
+    if (!question || thinking) return;
     setDraft("");
+    setMsgs((m) => [...m, { role: "user", text: question }]);
+
+    // In live mode ask the real Copilot endpoint (grounded in the trace's
+    // spans, finding, RCA and git context); fall back to the scripted answer
+    // whenever the API is unreachable so the demo never dead-ends.
+    if (LIVE_TRACES) {
+      setThinking(true);
+      void askCopilot(demo.traceId, question)
+        .then((answer) => {
+          setMsgs((m) => [...m, { role: "assistant", text: answer ?? answerFor(question, demo) }]);
+        })
+        .finally(() => setThinking(false));
+      return;
+    }
+    setMsgs((m) => [...m, { role: "assistant", text: answerFor(question, demo) }]);
   };
 
   const all = [intro, ...msgs];
@@ -169,6 +185,18 @@ ${demo.fixPr ? `${demo.fixPr.description}\n\n→ **PR #${demo.fixPr.number}** (\
               </p>
             </div>
           )
+        )}
+
+        {thinking && (
+          <div className="flex gap-2.5">
+            <div className="mt-0.5 w-5 h-5 rounded-md bg-indigo-500/15 border border-indigo-400/20 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-3 h-3 text-indigo-300/80" />
+            </div>
+            <span className="flex items-center gap-1.5 text-[12.5px] text-zinc-500">
+              <span className="w-1 h-1 rounded-full bg-zinc-500 animate-pulse" />
+              Analyzing the trace…
+            </span>
+          </div>
         )}
 
         {/* Actions — only for incidents (traces with a finding) */}

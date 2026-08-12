@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { IncidentDemo, DetectorEntity } from "@/lib/mock-observability";
 import { getDetectors } from "@/lib/mock-observability";
+import { fetchDetectors, fetchDetector, LIVE_TRACES } from "@/lib/traces-api";
 import { DETECTOR_LABEL, SeverityChip, ConfidenceMeter, MonoLabel } from "./ui";
 import { ShieldAlert, ChevronRight, ChevronLeft, AlertOctagon, Activity, DollarSign, GitPullRequest, Eye, CheckCircle2 } from "lucide-react";
 
@@ -128,8 +129,51 @@ function DetectorDetail({ detector, onBack, onOpen }: { detector: DetectorEntity
 }
 
 export function DetectorsView({ onOpen }: { onOpen: (id: string) => void }) {
-  const detectors = useMemo(() => getDetectors(), []);
+  const mock = useMemo(() => getDetectors(), []);
+  const [detectors, setDetectors] = useState<DetectorEntity[]>(mock);
   const [selected, setSelected] = useState<DetectorEntity | null>(null);
+
+  // Live mode: load real detectors + their findings/runs history. Any failure
+  // leaves the mock data in place so the demo never shows an empty section.
+  useEffect(() => {
+    if (!LIVE_TRACES) return;
+    let cancelled = false;
+    void fetchDetectors()
+      .then((live) => {
+        if (cancelled || live.length === 0) return;
+        setDetectors(
+          live.map((d) => ({
+            id: d.id,
+            name: d.name,
+            type: d.type,
+            description: d.description,
+            enabled: d.enabled,
+            findings: [],
+            runs: [],
+          }))
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Fetch a detector's history only when it's opened.
+  const open = (d: DetectorEntity) => {
+    setSelected(d);
+    if (!LIVE_TRACES) return;
+    void fetchDetector(d.name)
+      .then((full) => {
+        if (!full) return;
+        setSelected({
+          ...d,
+          findings: (full["findings"] as DetectorEntity["findings"]) ?? [],
+          runs: (full["runs"] as DetectorEntity["runs"]) ?? [],
+        });
+      })
+      .catch(() => undefined);
+  };
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-5xl mx-auto p-6">
@@ -140,7 +184,7 @@ export function DetectorsView({ onOpen }: { onOpen: (id: string) => void }) {
               <h1 className="text-[16px] text-zinc-100 font-medium">Detectors</h1>
             </div>
             <p className="text-[13px] text-zinc-500 mb-5">LLM-as-judge detectors evaluating every trace. Open one to see its findings and runs.</p>
-            <DetectorList detectors={detectors} onOpen={setSelected} />
+            <DetectorList detectors={detectors} onOpen={open} />
           </>
         ) : (
           <DetectorDetail detector={selected} onBack={() => setSelected(null)} onOpen={onOpen} />

@@ -56,3 +56,56 @@ export async function fetchRca(id: string): Promise<Record<string, unknown> | nu
     return null; // 404 = no RCA yet
   }
 }
+
+// ── Detectors ───────────────────────────────────────────────────────
+export interface LiveDetector {
+  id: string;
+  name: string;
+  type: "hallucination" | "tool_failure" | "intent_drift" | "safety";
+  description: string;
+  enabled: boolean;
+  openFindings: number;
+  totalFindings: number;
+  totalRuns: number;
+}
+
+export async function fetchDetectors(): Promise<LiveDetector[]> {
+  const data = await get<{ detectors: LiveDetector[] }>("/api/v1/detectors");
+  return data.detectors ?? [];
+}
+
+export async function fetchDetector(name: string): Promise<Record<string, unknown> | null> {
+  try {
+    return await get<Record<string, unknown>>(`/api/v1/detectors/${encodeURIComponent(name)}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchFindings(limit = 100): Promise<Array<Record<string, unknown>>> {
+  const data = await get<{ findings: Array<Record<string, unknown>> }>(`/api/v1/findings?limit=${limit}`);
+  return data.findings ?? [];
+}
+
+// ── Copilot ─────────────────────────────────────────────────────────
+/** Ask a question about a trace. Returns null when the API is unreachable, so
+ *  the caller can fall back to the scripted demo answer. */
+export async function askCopilot(traceId: string, question: string): Promise<string | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 30000); // the model can take a while
+  try {
+    const res = await fetch(`${BASE}/api/v1/traces/${traceId}/ask`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ question }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { answer?: string };
+    return data.answer ?? null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
