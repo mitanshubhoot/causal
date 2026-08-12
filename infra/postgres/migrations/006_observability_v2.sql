@@ -18,13 +18,28 @@ ALTER TABLE spans ADD CONSTRAINT spans_kind_check CHECK (
 );
 
 -- 3. Tenancy: a trace id must only be unique WITHIN an org ------------
-ALTER TABLE spans  DROP CONSTRAINT IF EXISTS spans_trace_id_fkey;
+-- Re-keying traces to (org_id, id) means EVERY foreign key pointing at
+-- traces(id) must be dropped first — Postgres refuses to drop a primary key
+-- that other constraints depend on. Three tables reference it: spans (004),
+-- trace_findings (004) and rca_runs (005). Missing any one of them aborts the
+-- migration, which silently blocks 007 and 008 too.
+ALTER TABLE spans          DROP CONSTRAINT IF EXISTS spans_trace_id_fkey;
+ALTER TABLE trace_findings DROP CONSTRAINT IF EXISTS trace_findings_trace_id_fkey;
+ALTER TABLE rca_runs       DROP CONSTRAINT IF EXISTS rca_runs_trace_id_fkey;
+
 ALTER TABLE traces DROP CONSTRAINT IF EXISTS traces_pkey;
 ALTER TABLE traces ADD  CONSTRAINT traces_pkey PRIMARY KEY (org_id, id);
 
 ALTER TABLE spans  DROP CONSTRAINT IF EXISTS spans_pkey;
 ALTER TABLE spans  ADD  CONSTRAINT spans_pkey PRIMARY KEY (org_id, trace_id, id);
 ALTER TABLE spans  ADD  CONSTRAINT spans_trace_fkey
+  FOREIGN KEY (org_id, trace_id) REFERENCES traces (org_id, id) ON DELETE CASCADE;
+
+-- Re-point the dependants at the composite key so cascade delete still works
+-- and a finding can never attach to another tenant's trace.
+ALTER TABLE trace_findings ADD CONSTRAINT trace_findings_trace_fkey
+  FOREIGN KEY (org_id, trace_id) REFERENCES traces (org_id, id) ON DELETE CASCADE;
+ALTER TABLE rca_runs ADD CONSTRAINT rca_runs_trace_fkey
   FOREIGN KEY (org_id, trace_id) REFERENCES traces (org_id, id) ON DELETE CASCADE;
 
 -- 4. Detector entities ------------------------------------------------
