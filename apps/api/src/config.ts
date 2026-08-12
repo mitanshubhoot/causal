@@ -33,9 +33,18 @@ const EnvSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().default("minioadmin"),
   S3_SECRET_ACCESS_KEY: z.string().default("minioadmin"),
 
-  // LLMs
+  // LLMs — server-wide fallback keys. Per-workspace keys (BYOK) live in
+  // provider_keys and are resolved by services/llm.ts; these are only used when
+  // an org has not stored its own. Other providers (xAI, DeepSeek, OpenRouter,
+  // Moonshot, Zhipu, Google, Bedrock) are read straight from process.env by
+  // llm.ts, so adding a provider needs no change here.
   ANTHROPIC_API_KEY: z.string().default(""),
   OPENAI_API_KEY: z.string().optional(),
+
+  // AES-256-GCM key (32 bytes, base64 or hex) for encrypting customer-supplied
+  // provider keys at rest. Optional: without it BYOK writes are refused with a
+  // clear 503 and the server-wide keys above keep working.
+  CAUSAL_ENCRYPTION_KEY: z.string().optional(),
 
   // Auth (Clerk)
   CLERK_SECRET_KEY: z.string().optional(),
@@ -70,6 +79,12 @@ const EnvSchema = z.object({
   RCA_MODEL: z.string().default("claude-sonnet-4-5"),
   COPILOT_MODEL: z.string().default("claude-sonnet-4-5"),
   SLACK_INCIDENT_CHANNEL: z.string().optional(),
+
+  // Sandbox verification — clone the repo and actually run its tests before
+  // claiming a fix is verified. Off by default: it executes repo code.
+  SANDBOX_ENABLED: boolEnv(false),
+  SANDBOX_ROOT: z.string().default(""),               // "" → <tmpdir>/causal-sandboxes
+  SANDBOX_TIMEOUT_MS: z.coerce.number().default(120_000),
 
   // Email alerting (Resend or SendGrid — whichever key is present)
   RESEND_API_KEY: z.string().optional(),

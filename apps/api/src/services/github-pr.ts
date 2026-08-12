@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { createGithubClient } from "./github.js";
+import { describeVerification, type VerificationResult } from "./verify.js";
 import { config } from "../config.js";
 
 const IS_DEMO = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
@@ -27,8 +28,58 @@ export interface PrResult {
   prNumber?: number;
   /** Unified diff computed from the ACTUAL patch we committed. */
   diff?: { kind: "add" | "del" | "ctx" | "meta"; text: string }[];
-  /** Whether the causal-replay check run was published and passed. */
+  /**
+   * True ONLY when a sandbox actually ran the repo's tests against this patch
+   * and they passed. Publishing a check run is not evidence of anything.
+   */
   verified?: boolean;
+  /** The conclusion we published on the causal-replay check run. */
+  checkConclusion?: CheckConclusion;
+}
+
+type CheckConclusion = "success" | "neutral" | "failure";
+
+/**
+ * The causal-replay check run used to be hardcoded to `success` — it asserted
+ * "the incident does not reproduce" without replaying anything. A check run is
+ * a claim GitHub shows next to a merge button, so it now reports exactly what
+ * happened: success only when tests really ran and passed, failure when they
+ * ran and failed, neutral (explicitly "not verified") in every other case,
+ * including when no verification was attempted at all.
+ */
+function buildCheckRun(
+  fix: FixContext,
+  verification: VerificationResult | null | undefined
+): { conclusion: CheckConclusion; title: string; summary: string } {
+  const origin = `**Root cause:** ${fix.summary}\n**Origin:** \`${fix.file}\`${fix.commit ? ` @ \`${fix.commit}\`` : ""}`;
+  const log = verification?.output ? `\n\n<details><summary>Test output</summary>\n\n\`\`\`\n${verification.output.slice(-8000)}\n\`\`\`\n\n</details>` : "";
+
+  if (!verification) {
+    return {
+      conclusion: "neutral",
+      title: "Not verified — no replay was run",
+      summary: `${origin}\n\nThis patch was generated from the trace and its git context, but **no sandbox replay or test run was performed**, so nothing here is verified. Review and run the suite before merging.`,
+    };
+  }
+  if (!verification.ran) {
+    return {
+      conclusion: "neutral",
+      title: "Not verified — the test suite did not run",
+      summary: `${origin}\n\n${describeVerification(verification)} The patch is therefore **unverified** — treat it as a proposal.${log}`,
+    };
+  }
+  if (!verification.passed) {
+    return {
+      conclusion: "failure",
+      title: "Replay failed — tests do not pass with this patch",
+      summary: `${origin}\n\n\`${verification.command}\` exited **${verification.exitCode}** in the sandbox after ${(verification.durationMs / 1000).toFixed(1)}s. The patch does **not** hold up — do not merge as-is.${log}`,
+    };
+  }
+  return {
+    conclusion: "success",
+    title: "Replay passed — tests green with this patch",
+    summary: `${origin}\n\n\`${verification.command}\` passed in a sandbox clone with this patch applied (${(verification.durationMs / 1000).toFixed(1)}s), so the recorded failure no longer reproduces.${log}`,
+  };
 }
 
 /**
@@ -101,8 +152,17 @@ async function correctFile(original: string, fix: FixContext): Promise<string | 
  * produce corrected file content (read via the GitHub API — no local clone).
  * Falls back to `proposed` (no PR) on any missing config or error, so RCA never
  * breaks. Returns the PR status for the caller to persist.
+ *
+ * Pass `verification` (from services/verify.ts, run in a sandbox) to have the
+ * causal-replay check run report a real result. Omit it and the check run says
+ * "not verified" — it will never claim success it did not earn.
  */
-export async function openFixPr(fastify: FastifyInstance, orgId: string, fix: FixContext): Promise<PrResult> {
+export async function openFixPr(
+  fastify: FastifyInstance,
+  orgId: string,
+  fix: FixContext,
+  verification?: VerificationResult | null
+): Promise<PrResult> {
   if (!config.GITHUB_APP_ID || !config.GITHUB_APP_PRIVATE_KEY || !fix.file || !anthropic) {
     return { prStatus: "proposed" };
   }
@@ -147,10 +207,12 @@ export async function openFixPr(fastify: FastifyInstance, orgId: string, fix: Fi
     const body = `**Root cause:** ${fix.summary}\n\n${fix.explanation}\n\n**Counterfactual:** ${fix.counterfactual}\n\n${fix.fixDescription}\n\n_Opened automatically by Causal after a detector flagged this incident._`;
     const pr = await gh.pulls.create({ owner, repo, title: fix.fixTitle, head: branch, base, body });
 
-    // Publish the causal-replay check run on the fix commit. This is the check
-    // the product surfaces as "verified" — previously nothing was published and
-    // "verified" was inferred from the PR merely existing.
-    let verified = false;
+    // Publish the causal-replay check run on the fix commit, reporting the
+    // ACTUAL verification outcome. `verified` then requires BOTH that the tests
+    // ran green and that the claim is visible on the PR — under-claiming is the
+    // only safe direction to be wrong in.
+    const check = buildCheckRun(fix, verification);
+    let checkPublished = false;
     try {
       await gh.checks.create({
         owner,
@@ -158,16 +220,13 @@ export async function openFixPr(fastify: FastifyInstance, orgId: string, fix: Fi
         name: "causal-replay",
         head_sha: commit.data.sha,
         status: "completed",
-        conclusion: "success",
-        output: {
-          title: "Replay: incident does not reproduce",
-          summary: `Replayed the failing trace against this patch.\n\n**Root cause:** ${fix.summary}\n**Origin:** \`${fix.file}\`${fix.commit ? ` @ \`${fix.commit}\`` : ""}\n\nThe failing call site now degrades safely, so the recorded failure no longer reproduces.`,
-        },
+        conclusion: check.conclusion,
+        output: { title: check.title, summary: check.summary },
       });
-      verified = true;
+      checkPublished = true;
     } catch (err) {
       // A check run needs checks:write; without it the PR is still valid, it
-      // just isn't verified. Never fail the whole fix for this.
+      // just isn't annotated. Never fail the whole fix for this.
       fastify.log.warn({ err }, "causal-replay check run could not be published");
     }
 
@@ -176,7 +235,8 @@ export async function openFixPr(fastify: FastifyInstance, orgId: string, fix: Fi
       prUrl: pr.data.html_url,
       prNumber: pr.data.number,
       diff: computeDiff(original, corrected, fix.file),
-      verified,
+      verified: checkPublished && check.conclusion === "success",
+      checkConclusion: check.conclusion,
     };
   } catch (err) {
     fastify.log.warn({ err, orgId }, "openFixPr failed — leaving fix as proposed");
