@@ -2,14 +2,36 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, ChevronRight, AlertOctagon, ShieldAlert, GitPullRequest, Gauge } from "lucide-react";
+import { Search, ChevronRight, AlertOctagon, ShieldAlert, GitPullRequest, Gauge, Shield } from "lucide-react";
 import { getAllDemos } from "@/lib/mock-observability";
+import { SECURITY_EVENTS, explorerIncidentFor } from "@/lib/mock-security";
+import type { SecurityEvent } from "@/lib/security-types";
 import { LogoMark } from "@/components/LogoMark";
 import { NAV_ITEMS } from "@/components/product/ProductNav";
 import { LoadingPane, useLiveIncidents } from "@/components/product/views";
 import { SeverityChip, ConfidenceMeter, MonoLabel, DETECTOR_LABEL, STATUS_META } from "@/components/product/ui";
 
 type SevFilter = "all" | "P1" | "P2" | "P3";
+
+/**
+ * Security events grouped by the incident whose trace they were raised against.
+ *
+ * `explorerIncidentFor` is the only wiring that proves an event and an incident
+ * share a trace, so a row is marked only when it resolves — an event on a trace
+ * with no explorer page, or a live incident whose id came from the API, matches
+ * nothing and gets no chip. Nothing here is inferred from titles or timestamps.
+ */
+const SECURITY_BY_INCIDENT: ReadonlyMap<string, SecurityEvent[]> = (() => {
+  const byIncident = new Map<string, SecurityEvent[]>();
+  for (const event of SECURITY_EVENTS) {
+    const incidentId = explorerIncidentFor(event.traceId);
+    if (!incidentId) continue;
+    const bucket = byIncident.get(incidentId);
+    if (bucket) bucket.push(event);
+    else byIncident.set(incidentId, [event]);
+  }
+  return byIncident;
+})();
 
 function StatTile({ label, value, sub, Icon, tone = "text-zinc-100" }: {
   label: string; value: string; sub?: string; Icon: typeof Gauge; tone?: string;
@@ -150,25 +172,53 @@ export default function IncidentsPage() {
             {filtered.length === 0 && (
               <p className="px-4 py-10 text-center font-mono text-[12px] text-zinc-600">No incidents match your filters.</p>
             )}
-            {filtered.map((d) => (
-              <Link
-                key={d.incidentId}
-                href={`/incidents/${d.incidentId}`}
-                className="grid grid-cols-[80px_1fr_150px_150px_28px] gap-3 px-4 py-3 items-center border-b border-white/[0.03] hover:bg-white/[0.03] transition-colors group"
-              >
-                <span><SeverityChip severity={d.severity} /></span>
-                <span className="min-w-0 flex items-center gap-2">
-                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_META.error.dot}`} />
-                  <span className="min-w-0">
-                    <span className="block text-[13px] text-zinc-200 truncate group-hover:text-zinc-100">{d.title}</span>
-                    <span className="block font-mono text-[10.5px] text-zinc-600 truncate">{d.service} · {d.externalId} · {d.startedAt}</span>
+            {filtered.map((d) => {
+              const sec = SECURITY_BY_INCIDENT.get(d.incidentId);
+              const secOpen = sec?.some((e) => e.status !== "resolved") ?? false;
+              return (
+                <div
+                  key={d.incidentId}
+                  className="relative grid grid-cols-[80px_1fr_150px_150px_28px] gap-3 px-4 py-3 items-center border-b border-white/[0.03] hover:bg-white/[0.03] transition-colors group"
+                >
+                  {/* The row still navigates to the trace, but a row with a
+                      security event has a second destination — and an <a>
+                      inside an <a> is invalid — so the row link is a stretched
+                      overlay rather than a wrapper. */}
+                  <Link
+                    href={`/incidents/${d.incidentId}`}
+                    aria-label={`Open incident: ${d.title}`}
+                    className="absolute inset-0"
+                  />
+                  <span><SeverityChip severity={d.severity} /></span>
+                  <span className="min-w-0 flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_META.error.dot}`} />
+                    <span className="min-w-0">
+                      <span className="block text-[13px] text-zinc-200 truncate group-hover:text-zinc-100">{d.title}</span>
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span className="font-mono text-[10.5px] text-zinc-600 truncate">{d.service} · {d.externalId} · {d.startedAt}</span>
+                        {sec && (
+                          <Link
+                            href="/security"
+                            title={sec.map((e) => `${e.id} · ${e.title}`).join("\n")}
+                            className={`relative z-10 flex-shrink-0 flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] tracking-[0.06em] transition-colors ${
+                              secOpen
+                                ? "border-red-400/25 bg-red-500/[0.08] text-red-300/90 hover:border-red-400/50"
+                                : "border-white/[0.07] bg-white/[0.02] text-zinc-500 hover:text-zinc-200 hover:border-white/20"
+                            }`}
+                          >
+                            <Shield className="w-3 h-3" strokeWidth={1.75} />
+                            {sec.length === 1 ? sec[0].id : `${sec.length} security events`}
+                          </Link>
+                        )}
+                      </span>
+                    </span>
                   </span>
-                </span>
-                <span className="hidden sm:block font-mono text-[11px] text-zinc-400">{DETECTOR_LABEL[d.finding.detector]}</span>
-                <span className="hidden sm:block"><ConfidenceMeter value={d.finding.confidence} /></span>
-                <ChevronRight className="w-4 h-4 text-zinc-700 group-hover:text-zinc-400 transition-colors justify-self-end" />
-              </Link>
-            ))}
+                  <span className="hidden sm:block font-mono text-[11px] text-zinc-400">{DETECTOR_LABEL[d.finding.detector]}</span>
+                  <span className="hidden sm:block"><ConfidenceMeter value={d.finding.confidence} /></span>
+                  <ChevronRight className="w-4 h-4 text-zinc-700 group-hover:text-zinc-400 transition-colors justify-self-end" />
+                </div>
+              );
+            })}
           </div>
           </>
         )}

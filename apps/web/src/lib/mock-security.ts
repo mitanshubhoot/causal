@@ -1352,8 +1352,28 @@ export const SECURITY_ASSERTIONS = { passing: 47, total: 50 }; // 0.94
 // `openCriticals` counts eventClass === "critical" with status new|triaging as
 // of measuredAt → exactly SEC-1043. `openHighs` counts severity "high" open at
 // the same instant → 0 (SEC-1049, SEC-1056, SEC-1058 were all resolved by then).
-// `unenforcedCriticalBoundary` is false because SEC-1055's gap was closed at
-// 14:07, 24 minutes before the measurement.
+// `unenforcedCriticalBoundary` is DERIVED, not asserted. It was hand-typed false
+// on the strength of SEC-1055's gap closing at 14:07 — while SEC-1043 sat in the
+// same corpus: critical, prod, enforced:false, outcome succeeded, on TB-04 which
+// is still in monitor. That is precisely the condition the ceiling exists for,
+// and the panel that printed "every critical boundary has an enforcement point"
+// named SEC-1043 as the open critical four lines above. Deriving it costs the
+// score nothing (33 is already below the 40 ceiling, so it arms without binding)
+// and makes the sentence true.
+
+/**
+ * A critical-severity boundary with NO enforcement point on a path that actually
+ * executed: a critical event that ran with no control armed and was not stopped.
+ * A hole in the perimeter, as distinct from merely having had a bad day — which
+ * is why this is the one condition that caps the score rather than scaling it.
+ */
+export const UNENFORCED_CRITICAL_BOUNDARY = SECURITY_EVENTS.some(
+  (e) =>
+    e.severity === "critical" &&
+    !e.enforced &&
+    (e.outcome === "succeeded" || e.outcome === "attempted") &&
+    !["resolved", "accepted_risk"].includes(e.status),
+);
 
 export const POSTURE: PostureInputs = {
   coverage: WEIGHTED_SPANS / TOTAL_SPANS, // 0.640
@@ -1363,7 +1383,7 @@ export const POSTURE: PostureInputs = {
   durability: SECURITY_ASSERTIONS.passing / SECURITY_ASSERTIONS.total, // 0.940
   openCriticals: 1,
   openHighs: 0,
-  unenforcedCriticalBoundary: false,
+  unenforcedCriticalBoundary: UNENFORCED_CRITICAL_BOUNDARY,
   measuredAt: "2026-08-11T14:31:00Z",
   commit: "a91f34d",
   headCommit: "c7d2e19",
@@ -1381,13 +1401,68 @@ export const POSTURE: PostureInputs = {
 // EXECUTE     TB-08 TB-10
 // CONTAINMENT TB-01 TB-11 TB-15
 
-export const PERIMETER: PerimeterCell[] = [
-  { key: "SOURCES", label: "Sources", detections: 5, mode: "monitor" },
-  { key: "CONTEXT", label: "Context", detections: 4, mode: "monitor" },
-  { key: "EGRESS", label: "Egress", detections: 3, mode: "canary", canaryPct: 25 },
-  { key: "EXECUTE", label: "Execute", detections: 2, mode: "canary", canaryPct: 5 },
-  { key: "CONTAINMENT", label: "Containment", detections: 3, mode: "enforce" },
-];
+/**
+ * Which detections defend each boundary. Lives here rather than in the view
+ * because the Perimeter strip's mode has to be DERIVED from these — authoring it
+ * separately is how the strip came to claim "EGRESS: canary 25%" over three
+ * rules of which none was canary, and "nothing on an observe-only path is
+ * denied" over a boundary that had denied SEC-1049.
+ */
+export const BOUNDARY_RULES: Record<PerimeterCell["key"], string[]> = {
+  SOURCES: ["TB-02", "TB-05", "TB-06", "TB-12", "TB-16"],
+  CONTEXT: ["TB-07", "TB-09", "TB-13", "TB-17"],
+  EGRESS: ["TB-03", "TB-04", "TB-14"],
+  EXECUTE: ["TB-08", "TB-10"],
+  CONTAINMENT: ["TB-01", "TB-11", "TB-15"],
+};
+
+/** off < monitor < canary < enforce. */
+const MODE_RANK: Record<Detection["mode"], number> = { off: 0, monitor: 1, canary: 2, enforce: 3 };
+
+/**
+ * A boundary is only as armed as its weakest ENABLED rule — one rule left in
+ * monitor means the boundary is not enforcing, however many siblings are.
+ *
+ * A disabled rule is deliberately NOT folded into that: reporting SOURCES as
+ * "off" because 1 of its 5 rules is disabled would be as misleading as the
+ * authored value it replaces, in the other direction. Disabled rules are a
+ * coverage hole, counted separately, so the strip can say "monitor · 1 rule off"
+ * — which is the fact a platform lead actually acts on.
+ */
+function boundaryMode(key: PerimeterCell["key"]): Pick<PerimeterCell, "mode" | "canaryPct"> {
+  const rules = BOUNDARY_RULES[key]
+    .map((id) => DETECTIONS.find((d) => d.id === id))
+    .filter((d): d is Detection => d !== undefined);
+  const enabled = rules.filter((r) => r.mode !== "off");
+  if (!enabled.length) return { mode: "off" };
+  const weakest = enabled.reduce((a, b) => (MODE_RANK[b.mode] < MODE_RANK[a.mode] ? b : a));
+  if (weakest.mode !== "canary") return { mode: weakest.mode };
+  // Among canary rules the smallest rollout is the honest number for the boundary.
+  const pct = Math.min(...enabled.filter((r) => r.mode === "canary").map((r) => r.canaryPct ?? 100));
+  return { mode: "canary", canaryPct: pct };
+}
+
+/** Rules on this boundary that are switched off entirely — a hole, not a mode. */
+export function boundaryRulesOff(key: PerimeterCell["key"]): number {
+  return BOUNDARY_RULES[key].filter(
+    (id) => DETECTIONS.find((d) => d.id === id)?.mode === "off"
+  ).length;
+}
+
+export const PERIMETER: PerimeterCell[] = (
+  [
+    ["SOURCES", "Sources"],
+    ["CONTEXT", "Context"],
+    ["EGRESS", "Egress"],
+    ["EXECUTE", "Execute"],
+    ["CONTAINMENT", "Containment"],
+  ] as const
+).map(([key, label]) => ({
+  key,
+  label,
+  detections: BOUNDARY_RULES[key].length,
+  ...boundaryMode(key),
+}));
 
 // ── Heatmap ───────────────────────────────────────────────────────────
 //
@@ -1434,27 +1509,52 @@ const HEAT_VIOLATIONS = new Set([
   "unregistered|READ_PRIVATE",
 ]);
 
+/** Declared violations and the incident each one cites. */
+const HEAT_EVIDENCE: Record<string, string> = {
+  "retrieved doc|EGRESS": "SEC-1042",
+  "web fetch|EGRESS": "SEC-1043",
+  "MCP tool return|EXECUTE": "SEC-1056",
+  "inbound email|MEMORY_WRITE": "SEC-1051",
+  "retrieved doc|MUTATE": "SEC-1059",
+  "unregistered|READ_PRIVATE": "SEC-1044",
+};
+
 export const HEATMAP: HeatCell[] = HEAT_SOURCES.flatMap((source) =>
   HEAT_SINKS.map((sink, i) => ({
     source,
     sink,
     flows: HEAT_FLOWS[source][i] ?? 0,
-    violatesPolicy: HEAT_VIOLATIONS.has(`${source}|${sink}`),
+    // Declared violation AND a citable incident. The caption promises every red
+    // ring resolves to a real event, so a ring without one must not be drawn —
+    // unregistered|READ_PRIVATE was declared here while its cited event's every
+    // hop carries capability NONE.
+    violatesPolicy:
+      HEAT_VIOLATIONS.has(`${source}|${sink}`) && heatEvidenceFor(source, sink) !== null,
   })),
 );
 
 /** The event that justifies a red-ringed heatmap cell. Null for every other cell. */
 export function heatCellEvidence(cell: HeatCell): string | null {
   if (!cell.violatesPolicy) return null;
-  const map: Record<string, string> = {
-    "retrieved doc|EGRESS": "SEC-1042",
-    "web fetch|EGRESS": "SEC-1043",
-    "MCP tool return|EXECUTE": "SEC-1056",
-    "inbound email|MEMORY_WRITE": "SEC-1051",
-    "retrieved doc|MUTATE": "SEC-1059",
-    "unregistered|READ_PRIVATE": "SEC-1044",
-  };
-  return map[`${cell.source}|${cell.sink}`] ?? null;
+  return heatEvidenceFor(cell.source, cell.sink);
+}
+
+/**
+ * The incident behind a declared policy violation — but only when that incident
+ * genuinely reaches the cell's sink.
+ *
+ * The caption promises every red ring resolves to a real event, so the lookup
+ * has to hold up: unregistered|READ_PRIVATE was declared a violation and cited
+ * SEC-1044, whose every hop carries capability NONE. Verifying here means a pair
+ * that stops being true stops being drawn, rather than quietly rendering a ring
+ * with nothing behind it.
+ */
+function heatEvidenceFor(source: string, sink: Capability): string | null {
+  const id = HEAT_EVIDENCE[`${source}|${sink}`];
+  if (!id) return null;
+  const ev = SECURITY_EVENTS.find((e) => e.id === id);
+  if (!ev || !ev.flow.some((f) => f.capability === sink)) return null;
+  return id;
 }
 
 // ── Source registry ───────────────────────────────────────────────────
@@ -1595,12 +1695,23 @@ export function computeScore(inputs: PostureInputs): ScoreResult {
 
   // What would the score be with the exposure multiplier cleared? Drives the
   // "resolving it alone returns you to N" footer.
-  const withoutExposure = Math.round(100 * coverageRoot * weighted);
+  //
+  // The ceiling has to apply to the counterfactual too. Clearing the exposure
+  // multiplier here lifts the raw score to 66, but if a critical boundary still
+  // has no enforcement point the ceiling binds at that point and the real
+  // recovery is 40. Promising 66 would be the score lying about its own rules —
+  // and the one number a reader is most likely to act on.
+  const withoutExposureRaw = Math.round(100 * coverageRoot * weighted);
+  const withoutExposure = ceilingArmed ? Math.min(withoutExposureRaw, CEILING) : withoutExposureRaw;
 
   const footerParts: string[] = [];
   if (inputs.openCriticals > 0) {
     const which = inputs.openCriticals === 1 ? "1 open critical" : `${inputs.openCriticals} open criticals`;
-    footerParts.push(`Halved by ${which}. Resolving ${inputs.openCriticals === 1 ? "it" : "them"} alone returns you to ${withoutExposure}.`);
+    const capped = ceilingArmed && withoutExposureRaw > CEILING;
+    footerParts.push(
+      `Halved by ${which}. Resolving ${inputs.openCriticals === 1 ? "it" : "them"} alone returns you to ${withoutExposure}` +
+        (capped ? ` — not ${withoutExposureRaw}, because the ceiling binds until a critical boundary has an enforcement point.` : ".")
+    );
   }
   if (inputs.openHighs > 0) {
     footerParts.push(`${inputs.openHighs} open high${inputs.openHighs === 1 ? "" : "s"} apply a further 0.85 each.`);

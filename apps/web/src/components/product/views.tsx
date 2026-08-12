@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import type { IncidentDemo, DetectorEntity } from "@/lib/mock-observability";
 import { getDetectors } from "@/lib/mock-observability";
 import { fetchDetectors, fetchDetector, fetchTraceList, fetchTraceDetail, fetchRca, LIVE_TRACES } from "@/lib/traces-api";
 import { mapLiveToDemo } from "@/lib/live-traces";
+// Named imports only: the security fixture is one large module, so the
+// dashboard pulls the four query functions it needs and no view code.
+import { POSTURE, TRIFECTAS, computeScore, countsByClass, listEvents } from "@/lib/mock-security";
+import { ClassChip } from "./security/trust-ui";
 import { DETECTOR_LABEL, SeverityChip, ConfidenceMeter, MonoLabel } from "./ui";
-import { ShieldAlert, ChevronRight, ChevronLeft, AlertOctagon, Activity, DollarSign, GitPullRequest, Eye, CheckCircle2, Loader2 } from "lucide-react";
+import { ShieldAlert, ChevronRight, ChevronLeft, AlertOctagon, Activity, DollarSign, GitPullRequest, Eye, CheckCircle2, Loader2, Shield } from "lucide-react";
 
 /** Shown while a live fetch is in flight. Rendering mock data under a real id
  *  while the API answers showed fabricated content attributed to that id. */
@@ -258,17 +263,42 @@ export function DetectorsView({ onOpen }: { onOpen: (id: string) => void }) {
 }
 
 // ── Dashboard view ──────────────────────────────────────────────────
-function StatTile({ label, value, sub, Icon, tone = "text-zinc-100" }: {
+/** `dim` renders the number at 40% — a figure that is no longer proven should
+ *  not read as loudly as one that is. `note` carries the reason. */
+function StatTile({ label, value, sub, Icon, tone = "text-zinc-100", href, dim = false, note }: {
   label: string; value: string; sub?: string; Icon: typeof Activity; tone?: string;
+  href?: string; dim?: boolean; note?: React.ReactNode;
 }) {
-  return (
-    <div className="rounded-lg border border-white/[0.06] p-4">
+  const body = (
+    <>
       <div className="flex items-center gap-1.5 mb-2">
         <Icon className="w-3.5 h-3.5 text-zinc-600" strokeWidth={1.75} />
         <MonoLabel>{label}</MonoLabel>
+        {href && <ChevronRight className="w-3.5 h-3.5 text-zinc-700 ml-auto group-hover:text-zinc-400 transition-colors" />}
       </div>
-      <p className={`text-[26px] font-light tracking-tight tabular-nums ${tone}`}>{value}</p>
+      <p className={`text-[26px] font-light tracking-tight tabular-nums ${tone} ${dim ? "opacity-40" : ""}`}>{value}</p>
       {sub && <p className="text-[11px] text-zinc-600 mt-0.5">{sub}</p>}
+      {note}
+    </>
+  );
+  const base = "rounded-lg border border-white/[0.06] p-4";
+  return href ? (
+    <Link href={href} className={`${base} block group hover:bg-white/[0.03] transition-colors`}>{body}</Link>
+  ) : (
+    <div className={base}>{body}</div>
+  );
+}
+
+/** Secondary figure inside a section panel — smaller than a StatTile so a row of
+ *  them does not compete with the KPI strip above it. */
+function MiniStat({ label, value, sub, tone = "text-zinc-100" }: {
+  label: string; value: string; sub: string; tone?: string;
+}) {
+  return (
+    <div className="px-4 py-3 border-b sm:border-b-0 sm:border-r last:border-r-0 last:border-b-0 border-white/[0.06]">
+      <MonoLabel>{label}</MonoLabel>
+      <p className={`text-[19px] font-light tracking-tight tabular-nums mt-1 ${tone}`}>{value}</p>
+      <p className="text-[10.5px] text-zinc-600 mt-0.5">{sub}</p>
     </div>
   );
 }
@@ -287,6 +317,30 @@ export function DashboardView({ demos, onOpen }: { demos: IncidentDemo[]; onOpen
     ? Math.round((demos.reduce((a, d) => a + d.finding.confidence, 0) / demos.length) * 100)
     : null;
 
+  // ── Security ────────────────────────────────────────────────────────
+  // Every figure below is a reduction over the fixture. Nothing is typed in.
+  const score = useMemo(() => computeScore(POSTURE), []);
+  // The fixture was measured at POSTURE.commit and HEAD has moved since, so the
+  // score is not a claim about the deployed code. It renders dimmed and says so.
+  const stale = POSTURE.commit !== POSTURE.headCommit;
+  const blocked7d = useMemo(() => countsByClass(7).blocked, []);
+  const openEvents = useMemo(() => listEvents({ status: ["new", "triaging"] }), []);
+  // listEvents orders newest-first; triage order is priority, so re-sort rather
+  // than take the top of the wrong list.
+  const topOpen = useMemo(
+    () =>
+      [...openEvents]
+        .sort((a, b) => b.priority - a.priority || Date.parse(b.timestamp) - Date.parse(a.timestamp))
+        .slice(0, 3),
+    [openEvents]
+  );
+  const exercised = TRIFECTAS.filter((t) => t.exercised).length;
+
+  // Five tiles when there is a confidence average to show, four when there is not.
+  const tileGrid = avgConf !== null
+    ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6"
+    : "grid grid-cols-2 md:grid-cols-4 gap-3 mb-6";
+
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-5xl mx-auto p-6">
@@ -294,14 +348,95 @@ export function DashboardView({ demos, onOpen }: { demos: IncidentDemo[]; onOpen
           <Activity className="w-4 h-4 text-zinc-400" />
           <h1 className="text-[16px] text-zinc-100 font-medium">Dashboard</h1>
         </div>
-        <p className="text-[13px] text-zinc-500 mb-5">Production agent health — last 24 hours.</p>
+        {/* One subtitle cannot cover both halves: incidents are a 24h view and the
+            security figures are 7d or unwindowed, so each carries its own label. */}
+        <p className="text-[13px] text-zinc-500 mb-5">Production agent health. Incidents cover the last 24 hours; each security figure carries its own window.</p>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <div className={tileGrid}>
           <StatTile label="Open incidents" value={String(demos.length)} sub={`${p1} P1`} Icon={AlertOctagon} tone="text-red-400" />
           <StatTile label="Detectors firing" value={String(firing)} sub="with open findings" Icon={ShieldAlert} />
-          <StatTile label="Fixes shipped" value={String(verified)} sub={`of ${demos.length} · causal-replay passed`} Icon={GitPullRequest} tone="text-emerald-400" />
+          {/* A ratio, not a bare count: "shipped" and "open" are frequently the
+              same integer, and two tiles printing 4 read as one number twice. */}
+          <StatTile
+            label="Fixes shipped"
+            value={`${verified}/${demos.length}`}
+            sub="causal-replay passed"
+            Icon={GitPullRequest}
+            tone="text-emerald-400"
+          />
+          <StatTile
+            label="Containment score"
+            value={String(score.score)}
+            sub={`measured at ${POSTURE.commit} · HEAD is ${POSTURE.headCommit}`}
+            Icon={Shield}
+            href="/security"
+            dim={stale}
+            note={
+              stale && (
+                <p className="font-mono text-[10px] tracking-[0.1em] text-amber-400/90 mt-1.5 leading-relaxed">
+                  UNPROVEN AT HEAD — {POSTURE.commitsSince} COMMIT{POSTURE.commitsSince === 1 ? "" : "S"} SINCE THE SCAN
+                </p>
+              )
+            }
+          />
           {avgConf !== null && (
             <StatTile label="Avg confidence" value={`${avgConf}%`} sub={`$${cost.toFixed(2)} spend`} Icon={DollarSign} />
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 mb-2">
+          <MonoLabel>Trust boundaries</MonoLabel>
+          <Link href="/security" className="ml-auto font-mono text-[10px] tracking-[0.1em] uppercase text-zinc-500 hover:text-zinc-300 transition-colors">
+            Security console
+          </Link>
+        </div>
+        <p className="text-[12px] text-zinc-600 mb-2 leading-relaxed">
+          Every span carries an origin and a capability; an event is one predicate,{" "}
+          <span className="font-mono text-[11.5px] text-zinc-500">reach(untrusted_origin, capability_sink)</span>. Demo corpus.
+        </p>
+        <div className="rounded-lg border border-white/[0.06] overflow-hidden mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 border-b border-white/[0.06]">
+            <MiniStat
+              label="Open trifectas"
+              value={String(TRIFECTAS.length)}
+              sub={`${exercised} exercised · ${TRIFECTAS.length - exercised} reachable, never traversed`}
+              tone="text-red-400"
+            />
+            <MiniStat
+              label="Blocked · 7d"
+              value={String(blocked7d.occurrences)}
+              sub={`${blocked7d.events} campaign${blocked7d.events === 1 ? "" : "s"} collapsed`}
+              tone="text-emerald-400"
+            />
+            <MiniStat
+              label="Open events"
+              value={String(openEvents.length)}
+              sub="new or triaging, all windows"
+            />
+          </div>
+          {topOpen.map((e) => (
+            <Link
+              key={e.id}
+              href="/security"
+              className="flex items-center gap-3 px-4 py-3 border-b last:border-b-0 border-white/[0.03] hover:bg-white/[0.03] transition-colors group"
+            >
+              <ClassChip eventClass={e.eventClass} />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[12.5px] text-zinc-200 truncate">{e.title}</span>
+                <span className="block font-mono text-[10.5px] text-zinc-600 truncate">
+                  {e.id} · {e.ruleId} · {e.agent}
+                </span>
+              </span>
+              <span className="font-mono text-[10px] text-zinc-600 tabular-nums hidden sm:block">priority {e.priority}</span>
+              <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors flex-shrink-0" />
+            </Link>
+          ))}
+          {/* The score's own arithmetic, printed by computeScore — the tile above
+              shows 33 and this is why it is 33. */}
+          {score.breakdown.footer && (
+            <p className="px-4 py-2.5 border-t border-white/[0.06] bg-white/[0.02] text-[11px] text-zinc-500 leading-relaxed">
+              Containment score {score.score} — {score.breakdown.footer}
+            </p>
           )}
         </div>
 

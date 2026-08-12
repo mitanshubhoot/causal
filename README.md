@@ -18,6 +18,18 @@ And surfaces the critical path automatically when something breaks.
 
 <img width="1460" height="799" alt="image" src="https://github.com/user-attachments/assets/d6d4673b-2a64-4081-b870-1fb0c810d014" />
 
+## The Five Capabilities
+
+In the order they run on a production failure:
+
+| # | Capability | Route | Does |
+|---|------------|-------|------|
+| 1 | Tracing | `/incidents` | OTLP ingest. Every LLM and tool call as a correlated trace tree, each span carrying the file, line and commit that produced it |
+| 2 | Detectors | `/detectors` | An LLM-as-judge scores *every* trace — not only the ones that errored — for hallucination, tool failure, intent drift and safety |
+| 3 | Trust Boundaries | `/security` | Origin and capability labels on every span, so the attack surface reduces to `reach(untrusted_origin, capability_sink)`. Monitoring only, on demo data — see below |
+| 4 | RCA + fix PR | `/incidents/[id]` | An agent clones the repo in a sandbox, finds the causing commit with git blame/pickaxe, explains it with a counterfactual, writes the fix and opens a PR |
+| 5 | Datasets & Evals | `/evals` | A finding promotes to a golden case with machine-checkable assertions; every release re-runs the set and reports fixed/regressed deltas |
+
 ## Quick Start (Local Dev)
 
 ### 1. Prerequisites
@@ -156,6 +168,12 @@ causal/
 │   ├── api/                # Fastify 5 REST API (Node.js + TypeScript, ESM)
 │   ├── rca/                # LangGraph RCA engine (Python microservice)
 │   └── web/                # Next.js 14 frontend
+│       └── src/
+│           ├── app/                          # / · /incidents · /incidents/[id] ·
+│           │                                 #   /detectors · /security · /evals · /dashboard
+│           ├── components/product/security/  # Trust Boundaries views (overview, events, flow map)
+│           └── lib/                          # mock-security.ts (demo fixture) +
+│                                             #   security-types.ts (the type contract)
 ├── infra/
 │   ├── neo4j/              # Graph schema + indexes
 │   ├── postgres/           # TimescaleDB + pgvector migrations + migrate.js
@@ -202,6 +220,56 @@ fires. Both are off by default because both spend model tokens.
 
 The judge's JSON is treated as untrusted and validated before it is stored — an
 out-of-enum detector or a nonsense confidence is rejected, never persisted.
+
+## Trust Boundaries (Security)
+
+Almost every real agent attack is a trust-level confusion, not a malicious string:
+untrusted bytes become instructions, or private bytes reach a sink nobody authorised. So
+every span carries two labels — an **origin** (who authored these bytes) and a
+**capability** (what this node can do) — and the whole attack surface reduces to one
+predicate:
+
+```
+reach(untrusted_origin, capability_sink)
+```
+
+| Label | Values |
+|-------|--------|
+| `Origin` | `TRUSTED_OPERATOR`, `TRUSTED_USER`, `SEMI_TRUSTED_INTERNAL`, `UNTRUSTED_EXTERNAL`, `UNTRUSTED_AGENT`, `UNKNOWN` |
+| `Capability` | `EGRESS`, `EXECUTE`, `MUTATE`, `READ_PRIVATE`, `MEMORY_WRITE`, `DELEGATE`, `NONE` |
+
+`UNKNOWN` resolves at no tier: it is a coverage gap, never a trust claim.
+
+This is decidable here because Causal owns the trace. The retrieval span, the tool
+return and the user turn exist as **separate rows** before anything was concatenated. A
+prompt-scanning gateway observes the prompt after concatenation, by which point the
+authorship information the predicate needs has already been destroyed — so it is not
+that such a gateway scores worse on this, it is that it structurally cannot see it.
+
+15 of the 17 detections never read natural language at all: they run over the span DAG,
+its origin and capability labels, and the flow edges between them. The two that use a
+model are second passes on a candidate the deterministic graph already selected.
+
+### What ships today
+
+Monitoring, on demo data, in the frontend only.
+
+- `/security` renders a fixture — `apps/web/src/lib/mock-security.ts`: 18 events raised
+  by a 17-rule detection catalogue — against the type contract in
+  `apps/web/src/lib/security-types.ts`.
+- There is no security route in the API and no labelling at ingest. `apps/api` does not
+  know this capability exists.
+- **Nothing is blocked.** The `blocked` / `enforced` / `contained` outcomes in the
+  fixture describe what a policy engine *would* have done. Enforcement — a policy
+  decision point in the request path — is a later phase. What exists is detection and
+  reporting.
+- The type contract is deliberately split from the fixture so a live mapper has a shape
+  to satisfy when the backend lands.
+
+Numbers in the view are computed from the fixture rather than written into it. The
+posture score is the clearest case: `computeScore(POSTURE)` returns **33** for the demo
+workspace — one critical is open and the measurement is stale against HEAD — and the
+view prints the arithmetic instead of only the result.
 
 ## Datasets & Evals
 

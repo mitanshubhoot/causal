@@ -81,7 +81,17 @@ const NODE_H = 62;
 const ROW_GAP = 30;
 const LANE_GAP = 112;
 const PAD_X = 18;
-const PAD_TOP = 46;
+/**
+ * The lane header is laid out in the DOM while nodes are positioned absolutely,
+ * so the two only stay apart if this constant actually covers the header. It did
+ * not: the context lane's hint wraps to two lines in a 248px column, putting the
+ * header at ~47px against a PAD_TOP of 46 — so the first node sat on top of the
+ * caption. The hint is now clamped to a fixed two-line box, which makes the
+ * header height deterministic rather than dependent on font fallback, and this
+ * derives from it with room to breathe.
+ */
+const LANE_HEADER_H = 48;
+const PAD_TOP = LANE_HEADER_H + 18;
 const PAD_BOTTOM = 28;
 const CANVAS_W = PAD_X * 2 + NODE_W * 3 + LANE_GAP * 2;
 const TIP_W = 312;
@@ -605,12 +615,18 @@ export function FlowMap({ event, onOpenTrace, className = "" }: FlowMapProps) {
                 className="absolute top-0 bottom-0 border-x border-white/[0.035] bg-white/[0.012]"
                 style={{ left: laneX(i) - NODE_W / 2 - 14, width: NODE_W + 28 }}
               >
-                <div className="px-2 pt-2 flex items-baseline gap-1.5">
-                  <MonoLabel className={count === 0 ? "text-zinc-700" : "text-zinc-500"}>{LANE_TITLE[lane]}</MonoLabel>
-                  <span className="font-mono text-[10px] text-zinc-700 tabular-nums">{count}</span>
-                </div>
-                <div className="px-2 pt-0.5">
-                  <span className="font-mono text-[9px] text-zinc-700 leading-tight">{LANE_HINT[lane]}</span>
+                {/* Fixed height so nodes can never be laid out over the caption. */}
+                <div className="px-2 pt-2 overflow-hidden" style={{ height: LANE_HEADER_H }}>
+                  <div className="flex items-baseline gap-1.5">
+                    <MonoLabel className={count === 0 ? "text-zinc-700" : "text-zinc-500"}>{LANE_TITLE[lane]}</MonoLabel>
+                    <span className="font-mono text-[10px] text-zinc-700 tabular-nums">{count}</span>
+                  </div>
+                  <span
+                    className="block font-mono text-[9px] text-zinc-700 leading-tight mt-0.5"
+                    style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden" }}
+                  >
+                    {LANE_HINT[lane]}
+                  </span>
                 </div>
               </div>
             );

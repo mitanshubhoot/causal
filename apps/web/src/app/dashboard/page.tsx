@@ -8,6 +8,8 @@ import { getAllDemos } from "@/lib/mock-observability";
 export default function DashboardPage() {
   const router = useRouter();
   // This route was mock-only: NEXT_PUBLIC_USE_LIVE_TRACES=1 changed nothing here.
+  // The security tiles navigate with <Link href="/security"> inside the view, so
+  // they need no router prop — this page still owns only the incident route.
   const live = useLiveIncidents();
   return (
     <ProductShell>

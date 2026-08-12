@@ -3,6 +3,11 @@
 import { useMemo, useState } from "react";
 import type { DemoSpan } from "@/lib/mock-observability";
 import { KIND_META, STATUS_META, fmtDuration, fmtTokens } from "./ui";
+// One derivation rule, one place — the tree and the detail panel must never
+// disagree about a span's origin. See deriveSpanProvenance for what it can and
+// cannot know; every label it produces is TIER 0 · INFERRED.
+import { deriveSpanProvenance } from "./SpanDetail";
+import { TRUST_META } from "./security/trust-ui";
 import { ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 
 interface Rollup {
@@ -76,16 +81,28 @@ export function TraceTree({
       const isSel = s.id === selectedId;
       const roll = rollups.get(s.id);
       const showRoll = !!roll && roll.tokensIn + roll.tokensOut > 0 && hasKids;
+      const trust = TRUST_META[deriveSpanProvenance(s).origin];
 
       rows.push(
         <button
           key={s.id}
           onClick={() => onSelect(s.id)}
-          className={`w-full flex items-center gap-1.5 pr-3 py-[5px] text-left transition-colors ${
+          className={`relative w-full flex items-center gap-1.5 pr-3 py-[5px] text-left transition-colors ${
             isSel ? "bg-white/[0.05]" : "hover:bg-white/[0.02]"
           }`}
           style={{ paddingLeft: 8 + depth * 14 }}
         >
+          {/* Trust ribbon. Absolutely positioned at the row's left edge so it
+              costs the layout nothing and every row's marker lands in one
+              column — scanning it shows where the trust level changes. Encoded
+              as fill/border/hatch on the neutral scale, never a new hue: colour
+              stays reserved for status. UNKNOWN renders as unknown. */}
+          <span
+            aria-hidden
+            title={`${trust.label} · TIER 0 · INFERRED — origin derived from span kind, not declared`}
+            style={trust.hatch ? { backgroundImage: trust.hatch } : undefined}
+            className={`absolute left-0 inset-y-0 w-[3px] ${trust.className}`}
+          />
           <span
             className="flex-shrink-0 w-3.5 flex items-center justify-center text-zinc-600 hover:text-zinc-300"
             onClick={(e) => {
@@ -138,6 +155,10 @@ export function TraceTree({
   const parentIds = spans.filter((s) => children.has(s.id)).map((s) => s.id);
   const allCollapsed = parentIds.length > 0 && parentIds.every((id) => collapsed.has(id));
 
+  /** How many ribbons carry a label at all. The rest are a coverage gap, and the
+   *  header says so rather than letting a quiet stripe read as "trusted". */
+  const labelled = spans.filter((s) => deriveSpanProvenance(s).origin !== "UNKNOWN").length;
+
   return (
     <div>
       {parentIds.length > 1 && (
@@ -149,7 +170,14 @@ export function TraceTree({
             {allCollapsed ? <ChevronsUpDown className="w-3 h-3" /> : <ChevronsDownUp className="w-3 h-3" />}
             {allCollapsed ? "Expand all" : "Collapse all"}
           </button>
-          <span className="ml-auto font-mono text-[10px] text-zinc-600">{spans.length} spans</span>
+          <span
+            title={`Trust ribbon at each row's left edge. Origin resolves for ${labelled} of ${spans.length} spans, inferred from span kind — TIER 0, never a declared label. The rest render as UNKNOWN.`}
+            className="ml-auto font-mono text-[10px] text-zinc-600 tabular-nums flex-shrink-0"
+          >
+            trust {labelled}/{spans.length}
+          </span>
+          <span aria-hidden className="font-mono text-[10px] text-zinc-700 flex-shrink-0">·</span>
+          <span className="font-mono text-[10px] text-zinc-600 flex-shrink-0">{spans.length} spans</span>
         </div>
       )}
       <div className="py-1">{rows}</div>

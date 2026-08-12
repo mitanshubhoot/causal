@@ -4,6 +4,8 @@ import React, { useEffect, useRef } from "react";
 import Link from "next/link";
 import { FEATURED_INCIDENT_ID } from "@/lib/mock-data";
 import { getDatasets, getRuns } from "@/lib/mock-evals";
+import { DETECTIONS, getEvent } from "@/lib/mock-security";
+import type { Origin } from "@/lib/security-types";
 import { ScrambleText } from "@/components/ScrambleText";
 import { LandingTraceDemo } from "@/components/LandingTraceDemo";
 import { FailureTicker } from "@/components/FailureTicker";
@@ -19,6 +21,7 @@ import {
   Webhook,
   Search,
   Shield,
+  Radar,
   Waypoints,
   Zap,
   FileText,
@@ -727,6 +730,7 @@ function HeroSection() {
     "Correlated trace tree of every LLM call, tool call, and step",
     "Git context: each span linked to file, line, and commit",
     "LLM-as-judge detects failures, alerts Slack & email",
+    "Trust boundaries: an origin and a capability on every span",
     "Agentic RCA ties the failure to the exact commit",
     "Auto-opens a fix PR on GitHub with a causal-replay check",
   ];
@@ -1242,6 +1246,184 @@ function BenefitEvalVisual() {
   );
 }
 
+/**
+ * Trust Boundaries, shown rather than asserted — one real flow from the security
+ * fixtures, source → hop → sink, with the untrusted hops hatched and the hop that
+ * crossed the boundary marked. Every string and every number here is a field on
+ * the event or on its detection; nothing is authored in this file.
+ *
+ * SEC-1043 is the flow to show: the sink is a markdown image the reader's own
+ * renderer fetches, so no http span exists in the trace at all. Nothing watching
+ * network egress from the agent host sees it, and nothing reading the prompt sees
+ * it either — only something holding the labelled span DAG does. It is also the
+ * event the corpus did NOT stop, which keeps the page honest about what a
+ * monitoring capability is.
+ */
+const TRUST_FLOW_EVENT_ID = "SEC-1043";
+
+/**
+ * The 4px diagonal hatch that marks untrusted bytes, matching the treatment the
+ * security console uses. Trust is texture, not hue — colour stays on status.
+ */
+const UNTRUSTED_HATCH =
+  "repeating-linear-gradient(45deg, rgba(245,158,11,0.16) 0, rgba(245,158,11,0.16) 1px, transparent 1px, transparent 4px)";
+
+/** The console's short form for an origin — the label's last segment. */
+function originShort(origin: Origin): string {
+  return origin.split("_").pop() ?? origin;
+}
+
+function isUntrustedOrigin(origin: Origin): boolean {
+  return origin === "UNTRUSTED_EXTERNAL" || origin === "UNTRUSTED_AGENT";
+}
+
+function BenefitSecurityVisual() {
+  const ev = getEvent(TRUST_FLOW_EVENT_ID);
+  if (!ev) return null;
+
+  const rule = DETECTIONS.find((d) => d.id === ev.ruleId);
+  const crossing = ev.flow.find((n) => n.violating) ?? ev.flow[ev.flow.length - 1];
+  const blocked = ev.outcome === "blocked";
+  const w = ev.witness;
+
+  return (
+    <div className="w-full rounded-xl border border-white/[0.08] overflow-hidden">
+      <div className="bg-white/[0.02] border-b border-white/[0.06] px-5 py-3 flex items-center justify-between gap-3">
+        <span className="font-mono text-[11px] text-white/25 tracking-wider">
+          TRUST BOUNDARY · {ev.id}
+        </span>
+        <span
+          className={`font-mono text-[10px] tracking-wider ${
+            blocked ? "text-emerald-400/70" : "text-red-400/80"
+          }`}
+        >
+          {ev.outcome.toUpperCase()}
+        </span>
+      </div>
+
+      <div className="bg-black p-5">
+        {/* The flow. Origin on the left, capability on the right — the two labels
+            the predicate is made of, in the order it reads. */}
+        <p className="font-mono text-[10px] tracking-[0.2em] text-white/25 uppercase mb-4">
+          Flow · trace {ev.traceId.slice(0, 8)}
+        </p>
+
+        <div className="relative pl-6 space-y-3">
+          <div className="absolute left-[4px] top-2 bottom-2 w-px bg-white/[0.08]" aria-hidden />
+          {ev.flow.map((node) => {
+            const untrusted = isUntrustedOrigin(node.origin);
+            const isCrossing = node === crossing;
+            return (
+              <div key={node.spanId} className="relative flex items-center gap-2.5">
+                <span
+                  aria-hidden
+                  className={`absolute -left-6 top-1/2 -translate-y-1/2 w-[9px] h-[9px] rounded-full border ${
+                    isCrossing
+                      ? blocked
+                        ? "border-emerald-400/70 bg-emerald-400/40"
+                        : "border-red-400/70 bg-red-400/40"
+                      : "border-white/20 bg-black"
+                  }`}
+                />
+                <span
+                  style={untrusted ? { backgroundImage: UNTRUSTED_HATCH } : undefined}
+                  className={`shrink-0 w-[74px] text-center font-mono text-[9px] tracking-[0.08em] px-1.5 py-1 rounded border ${
+                    untrusted
+                      ? "border-amber-500/30 bg-amber-500/[0.07] text-amber-200/80"
+                      : "border-white/[0.09] bg-white/[0.02] text-white/40"
+                  }`}
+                >
+                  {originShort(node.origin)}
+                </span>
+                <span
+                  className={`flex-1 min-w-0 truncate font-mono text-[11px] ${
+                    isCrossing ? "text-white/70" : "text-white/40"
+                  }`}
+                >
+                  {node.name}
+                </span>
+                {node.capability !== "NONE" && (
+                  <span
+                    className={`shrink-0 font-mono text-[9px] tracking-[0.08em] px-1.5 py-0.5 rounded border ${
+                      isCrossing && !blocked
+                        ? "border-red-400/40 bg-red-500/[0.08] text-red-300/90"
+                        : "border-white/[0.09] text-white/35"
+                    }`}
+                  >
+                    {node.capability}
+                  </span>
+                )}
+                <span className="shrink-0 w-[56px] text-right font-mono text-[10px] text-white/25 tabular-nums">
+                  {node.bytes === undefined ? "—" : `${node.bytes.toLocaleString()} B`}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="glow-line my-4" />
+
+        {/* The predicate, resolved against this flow. */}
+        <p className="font-mono text-[11px] text-white/45 leading-relaxed">
+          reach(<span className="text-amber-200/70">{crossing.origin}</span>,{" "}
+          <span className={blocked ? "text-emerald-400/70" : "text-red-400/80"}>{crossing.capability}</span>)
+        </p>
+        {/* Where the sink actually is. Both halves are counted off the flow: for
+            SEC-1043 the capability is reached at an llm span and the trace holds
+            no http span at all, which is the whole argument for owning the trace
+            rather than watching the network. */}
+        <p className="font-mono text-[10px] text-white/25 mt-1.5 leading-relaxed">
+          sink at kind={crossing.kind} · {ev.flow.filter((n) => n.kind === "http").length} http spans in this trace
+        </p>
+        <p className="font-mono text-[10px] text-white/25 mt-1.5 leading-relaxed">
+          {w.kind} witness
+          {w.sourceSpanId && w.sinkSpanId && (
+            <>
+              {" · "}
+              {w.sourceSpanId}
+              {w.sourceOffset !== undefined && `:${w.sourceOffset}`} → {w.sinkSpanId}
+              {w.sinkOffset !== undefined && `:${w.sinkOffset}`}
+            </>
+          )}
+        </p>
+
+        {rule && (
+          <>
+            <div className="glow-line my-4" />
+            <div className="space-y-1.5">
+              <div className="flex items-baseline gap-3">
+                <span className="font-mono text-[9px] tracking-[0.18em] text-white/20 uppercase w-[62px] shrink-0">Rule</span>
+                <span className="font-mono text-[10px] text-white/40">
+                  {rule.id} · {rule.name} · {rule.mode}
+                </span>
+              </div>
+              <div className="flex items-baseline gap-3">
+                <span className="font-mono text-[9px] tracking-[0.18em] text-white/20 uppercase w-[62px] shrink-0">Signal</span>
+                <span className="font-mono text-[10px] text-white/40">{rule.signal}</span>
+              </div>
+              {rule.backtest && (
+                <div className="flex items-baseline gap-3">
+                  <span className="font-mono text-[9px] tracking-[0.18em] text-white/20 uppercase w-[62px] shrink-0">Backtest</span>
+                  <span className="font-mono text-[10px] text-white/40 tabular-nums">
+                    {rule.backtest.fires} fires · {rule.backtest.confirmed} confirmed · precision{" "}
+                    {rule.backtest.precision.toFixed(2)} · {rule.backtest.windowDays}d
+                  </span>
+                </div>
+              )}
+              <div className="flex items-baseline gap-3">
+                <span className="font-mono text-[9px] tracking-[0.18em] text-white/20 uppercase w-[62px] shrink-0">Model</span>
+                <span className="font-mono text-[10px] text-white/40">
+                  {rule.usesModel ? "judge" : "none — deterministic"}
+                </span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function BenefitSection({
   num,
   tag,
@@ -1326,6 +1508,10 @@ function BenefitSection({
 }
 
 function BenefitSections() {
+  // The deterministic/judge split is a property of the detection catalogue, not
+  // a claim — count it rather than type it.
+  const deterministic = DETECTIONS.filter((d) => !d.usesModel).length;
+
   return (
     <>
       <BenefitSection
@@ -1351,24 +1537,34 @@ function BenefitSections() {
       />
       <BenefitSection
         num="03"
-        tag="[ 03 / HEAL ]"
+        tag="[ 03 / SECURE ]"
+        headline={"The attack is a\ntrust confusion,\nnot a string."}
+        sub="Every span carries an origin — who authored these bytes — and a capability — what this node can do. Untrusted content reaching an egress-capable span with private data in scope stops being a string to scan and becomes a path in the trace: reach(untrusted_origin, capability_sink)."
+        body={`Causal owns the trace, so the retrieved page, the tool return and the user's turn are separate rows before anything was concatenated — the authorship a prompt-scanning gateway no longer has by the time it observes a prompt. ${deterministic} of the ${DETECTIONS.length} detections never read natural language at all. The console runs on demo data: it labels, detects and explains — it does not block.`}
+        cta="OPEN THE SECURITY CONSOLE"
+        ctaHref="/security"
+        visual={<BenefitSecurityVisual />}
+      />
+      <BenefitSection
+        num="04"
+        tag="[ 04 / HEAL ]"
         headline={"Root-caused\nto the commit.\nFixed in a PR."}
         sub="An AI agent clones your repo in a sandbox, correlates the failing span to the exact commit and git history, and explains the cause with a counterfactual. Then it writes the fix and opens the GitHub PR."
         body="Every pull request ships with a diff, a description, and a causal-replay check that runs your tests against the patch when sandbox verification is enabled — and says so plainly when it hasn't."
         cta="EXPLORE A LIVE INCIDENT"
         ctaHref={`/incidents/${FEATURED_INCIDENT_ID}`}
         visual={<BenefitPostmortemVisual />}
+        flip
       />
       <BenefitSection
-        num="04"
-        tag="[ 04 / IMPROVE ]"
+        num="05"
+        tag="[ 05 / IMPROVE ]"
         headline={"Every fix,\nverified —\nand kept fixed."}
         sub="A confirmed failure becomes a golden case in one click. Every release is re-run against the whole set, so a fix is proven and a regression can't quietly come back."
         body="Online detection and offline evaluation in one loop — run from the CLI or from inside Claude Code, Cursor, or Codex. Release over release, your agent gets measurably more robust."
         cta="OPEN THE EVAL SETS"
         ctaHref="/evals"
         visual={<BenefitEvalVisual />}
-        flip
       />
     </>
   );
@@ -1396,13 +1592,22 @@ function HowItWorksSection() {
     },
     {
       num: "03",
+      icon: Waypoints,
+      title: "Trust boundaries on the same trace",
+      description: "Each span is labelled with an origin — who authored these bytes — and a capability — what this node can do. Untrusted content reaching a capability sink is then a path in the trace, not a pattern in a prompt.",
+      // Detection output, not an API surface — there is no security call to
+      // write here that the SDK actually exposes. Fields are SEC-1043's.
+      code: `# trust boundary · SEC-1043\n✗ TB-04  rendered-egress sink\n  llm.summarize  UNTRUSTED_EXTERNAL\n  capability EGRESS · 44 B tainted\n→ reach(untrusted_origin, EGRESS)`,
+    },
+    {
+      num: "04",
       icon: GitBranch,
       title: "An agent finds the cause",
       description: "Causal clones your repo in a sandbox, correlates the failing span to the exact commit and git history, and explains the root cause plus the counterfactual.",
       code: `rca.run(incident_id)\n# commit a3f21c · date parsing\n# "if dates were ranged,\n#  this wouldn't have happened"`,
     },
     {
-      num: "04",
+      num: "05",
       icon: Activity,
       title: "It opens the fix PR",
       description: "Causal writes the fix and opens a GitHub pull request — diff, description, and a causal-replay check that runs your tests against the patch when sandbox verification is enabled.",
@@ -1454,6 +1659,10 @@ function HowItWorksSection() {
               </div>
             </motion.div>
           ))}
+          {/* Same reason as the features grid: the 1px "gaps" are this
+              container's own background between black cards, so an odd step
+              count would paint the empty cell as a grey block. */}
+          {steps.length % 2 !== 0 && <div aria-hidden className="hidden md:block bg-black" />}
         </motion.div>
       </div>
     </section>
@@ -1557,7 +1766,8 @@ function FeaturesSection() {
     { icon: GitBranch, title: "Git-linked spans", description: "Every span carries the file, line, and commit that produced it — so a failure is one click from the code that caused it.", href: incident, see: "See a git-linked span" },
     { icon: Search, title: "Signal, not noise", description: "Traces are scored on error, latency, cost, retry loops and whether a failure is actionable. The ones that matter surface; the rest are sampled away.", href: "/incidents", see: "Browse incidents" },
     { icon: Shield, title: "LLM-as-judge detectors", description: "Continuous evaluation for hallucination, tool and logic failures, intent drift, and safety violations — scored on every trace, not just the ones that already errored.", href: "/detectors", see: "See the detectors" },
-    { icon: Waypoints, title: "Trust boundaries", description: "Every span is labelled with where its bytes came from and what it can do, so untrusted content reaching an egress tool with private data in scope is a graph query — not a prompt scan. Blocked and succeeded are both on the record.", href: "/security", see: "Open the security console" },
+    { icon: Waypoints, title: "Trust boundaries", description: "Every span is labelled with where its bytes came from and what it can do, so untrusted content reaching an egress tool with private data in scope is a path in the trace — not a pattern in a prompt. Blocked and succeeded are both on the record.", href: "/security", see: "Open the security console" },
+    { icon: Radar, title: `${DETECTIONS.length} boundary detections`, description: `${DETECTIONS.filter((d) => !d.usesModel).length} of them never read natural language — they run on span shape, origin labels and byte provenance. Each one states what it catches, the signal it needs, and its backtest over stored traces.`, href: "/security", see: "See the detections" },
     { icon: Cpu, title: "Agentic RCA", description: "An AI agent works in a sandbox with your source: real git blame and pickaxe to find the commit that introduced the failure, explained with a counterfactual.", href: incident, see: "Read an RCA" },
     { icon: GitBranch, title: "Commits, PRs and issues", description: "A failure is correlated not just to the commit but to the pull request that shipped it, the issues it closed, and open issues that already describe it.", href: incident, see: "See the correlation" },
     { icon: Code2, title: "Verified fix PRs", description: "Causal writes the fix and opens a pull request — diff, description, and a causal-replay check that runs your tests against the patch before claiming it's resolved.", href: incident, see: "Open a fix PR" },
