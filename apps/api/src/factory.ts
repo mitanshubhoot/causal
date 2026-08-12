@@ -16,6 +16,7 @@ import nodesPlugin from "./routes/nodes.js";
 import edgesPlugin from "./routes/edges.js";
 import tracePlugin from "./routes/trace.js";
 import tracesPlugin, { detectorsPlugin } from "./routes/traces.js";
+import otlpPlugin from "./routes/otlp.js";
 import replayPlugin from "./routes/replay.js";
 import postmortemPlugin from "./routes/postmortem.js";
 import snapshotsPlugin from "./routes/snapshots.js";
@@ -141,6 +142,9 @@ export function registerApp(app: FastifyInstance): void {
   app.register(tracePlugin,      { prefix: "/api/v1/trace" });
   app.register(tracesPlugin,     { prefix: "/api/v1/traces" });
   app.register(detectorsPlugin,  { prefix: "/api/v1" });
+  // Standard OTLP/HTTP collector path, so an unmodified OpenTelemetry SDK can
+  // export to Causal by pointing OTEL_EXPORTER_OTLP_ENDPOINT at us.
+  app.register(otlpPlugin,       { prefix: "/v1" });
   app.register(replayPlugin,     { prefix: "/api/v1/replay" });
   app.register(postmortemPlugin, { prefix: "/api/v1/postmortem" });
 
