@@ -300,6 +300,11 @@ export default function IncidentPage({ params }: PageProps) {
               <span className="font-mono text-[12px] text-zinc-200 truncate">{demo.traceId}</span>
               <CopyButton value={demo.traceId} />
               <SeverityChip severity={demo.severity} />
+              {demo.finding && (
+                <span className="inline-flex items-center gap-1 font-mono text-[9px] tracking-[0.1em] uppercase font-semibold text-red-400 border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 rounded animate-pulse">
+                  Alert
+                </span>
+              )}
               {/* Trace/Timeline toggle */}
               <div className="ml-auto flex items-center rounded-md border border-white/10 overflow-hidden">
                 {([["trace", ListTree], ["timeline", GanttChart]] as const).map(([mode, Icon]) => (
@@ -316,7 +321,7 @@ export default function IncidentPage({ params }: PageProps) {
               </div>
             </div>
             <div className="flex items-center gap-3 px-4 h-8 border-b border-white/[0.04] font-mono text-[11px] text-zinc-500 flex-shrink-0">
-              <span className="tabular-nums">{tokens(demo.tokensIn)} → {tokens(demo.tokensOut)} tok</span>
+              <span className="tabular-nums">{tokens(demo.tokensIn)} → {tokens(demo.tokensOut)} ({tokens(demo.tokensIn + demo.tokensOut)})</span>
               <span className="text-zinc-700">·</span>
               <span className="tabular-nums">${demo.cost.toFixed(4)}</span>
               <span className="text-zinc-700">·</span>
@@ -347,7 +352,10 @@ export default function IncidentPage({ params }: PageProps) {
 
           {/* ── Span detail ── */}
           <section className="hidden md:flex w-[340px] flex-col border-r border-white/[0.06] flex-shrink-0">
-            <SpanDetail span={selectedSpan} />
+            <SpanDetail
+              span={selectedSpan}
+              trace={{ repo: demo.repo, gitRef: demo.gitRef, user: demo.user, sessionId: demo.sessionId, metadata: demo.metadata }}
+            />
           </section>
 
           {/* ── Copilot ── */}
@@ -356,7 +364,7 @@ export default function IncidentPage({ params }: PageProps) {
           </section>
         </>
       ) : view === "detectors" ? (
-        <DetectorsView demos={demos} onOpen={openIncident} />
+        <DetectorsView onOpen={openIncident} />
       ) : (
         <DashboardView demos={demos} onOpen={openIncident} />
       )}

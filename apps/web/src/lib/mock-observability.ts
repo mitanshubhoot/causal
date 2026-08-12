@@ -93,6 +93,12 @@ export interface ObservabilityDemo {
   tokensOut: number;
   cost: number;
   spans: DemoSpan[];
+  // trace-level context (shown as chips in the span detail)
+  repo?: string;
+  gitRef?: string;
+  user?: string;
+  sessionId?: string;
+  metadata?: { label: string; value: string }[];
   // healthy traces omit finding/rootCause/fixPr
   finding?: DetectorFinding;
   rootCause?: DemoRootCause;
@@ -126,6 +132,16 @@ const DEMO_I4: IncidentDemo = {
   tokensIn: 12400,
   tokensOut: 2180,
   cost: 0.1841,
+  repo: "acme/storefront",
+  gitRef: "b91f0ac4",
+  user: "cust_92f1",
+  sessionId: "sess-code-4471",
+  metadata: [
+    { label: "region", value: "us-east-1" },
+    { label: "deploy", value: "checkout@2026.08.12" },
+    { label: "traffic_share", value: "34% (legacy path)" },
+    { label: "revenue_at_risk", value: "$18,400" },
+  ],
   spans: [
     {
       id: "s0",
@@ -308,6 +324,15 @@ const DEMO_I1: IncidentDemo = {
   tokensIn: 8200,
   tokensOut: 1440,
   cost: 0.1122,
+  repo: "acme/voice-agents",
+  gitRef: "7c1d9e2a",
+  user: "patient_4471",
+  sessionId: "sess-voice-2231",
+  metadata: [
+    { label: "channel", value: "phone" },
+    { label: "asr_confidence", value: "0.61" },
+    { label: "clinic", value: "Downtown Family Health" },
+  ],
   spans: [
     { id: "s0", parentId: null, name: "voice-scheduler.run", kind: "agent", startMs: 0, durationMs: 1830, status: "warn",
       attributes: [{ label: "session", value: "sess-voice-2231" }, { label: "channel", value: "phone" }],
@@ -374,6 +399,15 @@ const DEMO_I2: IncidentDemo = {
   tokensIn: 4100,
   tokensOut: 520,
   cost: 0.0471,
+  repo: "acme/market-agents",
+  gitRef: "3f9a1c05",
+  user: "trader_88",
+  sessionId: "sess-stock-8890",
+  metadata: [
+    { label: "symbol", value: "NVDA" },
+    { label: "provider", value: "quotes-api v3" },
+    { label: "field_renamed", value: "change → pct_change" },
+  ],
   spans: [
     { id: "s0", parentId: null, name: "stock-agent.run", kind: "agent", startMs: 0, durationMs: 940, status: "error",
       attributes: [{ label: "session", value: "sess-stock-8890" }, { label: "symbol", value: "NVDA" }],
@@ -436,6 +470,15 @@ const DEMO_I3: IncidentDemo = {
   tokensIn: 3600,
   tokensOut: 610,
   cost: 0.0388,
+  repo: "acme/billing-agents",
+  gitRef: "5e2b7d18",
+  user: "acct_ops",
+  sessionId: "sess-bill-3390",
+  metadata: [
+    { label: "invoice", value: "$4,200.00" },
+    { label: "order", value: "#55210" },
+    { label: "expected_customer", value: "cust_5521" },
+  ],
   spans: [
     { id: "s0", parentId: null, name: "billing-agent.run", kind: "agent", startMs: 0, durationMs: 1260, status: "error",
       attributes: [{ label: "session", value: "sess-bill-3390" }, { label: "invoice", value: "$4,200.00" }],
@@ -489,6 +532,14 @@ function healthy(over: Partial<ObservabilityDemo> & Pick<ObservabilityDemo, "inc
     title: over.spans[0]?.name ?? over.service,
     severity: "OK",
     model: "claude-sonnet-4-5",
+    repo: `acme/${over.service}`,
+    gitRef: "main",
+    user: "example-user",
+    sessionId: over.spans[0]?.attributes?.find((a) => a.label === "session")?.value ?? "session",
+    metadata: [
+      { label: "environment", value: "production" },
+      { label: "outcome", value: "ok" },
+    ],
     ...over,
   };
 }
@@ -591,6 +642,50 @@ export function getObservabilityDemo(incidentId: string): ObservabilityDemo {
 /** Only the incidents (with findings) — for the detectors + dashboard views and the /incidents list. */
 export function getAllDemos(): IncidentDemo[] {
   return INCIDENTS;
+}
+
+// ── Named detectors (LLM-as-judge definitions) with findings + runs ──
+export interface DetectorEntity {
+  id: string;
+  name: string;
+  type: DetectorType;
+  description: string;
+  enabled: boolean;
+  findings: { traceId: string; findingId: string; timestamp: string; title: string; severity: string; confidence: number; service: string }[];
+  runs: { traceId: string; timestamp: string; identified: boolean; service: string }[];
+}
+
+const DETECTOR_DEFS: { name: string; type: DetectorType; description: string }[] = [
+  { name: "tool-failure-v1", type: "tool_failure", description: "Flags unhandled tool/function exceptions on the critical path." },
+  { name: "hallucination-v1", type: "hallucination", description: "Flags responses with fabricated facts or unsupported claims." },
+  { name: "intent-drift-v1", type: "intent_drift", description: "Flags outputs that diverge from the user's original request." },
+  { name: "safety-v1", type: "safety", description: "Flags policy or safety violations in agent output." },
+];
+
+export function getDetectors(): DetectorEntity[] {
+  const all = [...INCIDENTS, ...HEALTHY];
+  return DETECTOR_DEFS.map((def, di) => {
+    const findings = INCIDENTS.filter((d) => d.finding.detector === def.type).map((d, i) => ({
+      traceId: d.incidentId,
+      findingId: `${def.name.replace(/-v1$/, "")}-${String(di)}${String(i)}${d.traceId.slice(0, 6)}`,
+      timestamp: d.startedAt,
+      title: d.finding.title,
+      severity: d.finding.severity,
+      confidence: d.finding.confidence,
+      service: d.service,
+    }));
+    const runs = all.map((d) => ({
+      traceId: d.incidentId,
+      timestamp: d.startedAt,
+      identified: d.finding?.detector === def.type,
+      service: d.service,
+    }));
+    return { id: `det-${di}`, name: def.name, type: def.type, description: def.description, enabled: true, findings, runs };
+  });
+}
+
+export function getDetector(name: string): DetectorEntity | undefined {
+  return getDetectors().find((d) => d.name === name);
 }
 
 export function hasObservabilityDemo(incidentId: string): boolean {

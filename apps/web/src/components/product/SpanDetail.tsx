@@ -2,7 +2,25 @@
 
 import type { DemoSpan } from "@/lib/mock-observability";
 import { KIND_META, STATUS_META, MonoLabel, CopyButton } from "./ui";
-import { GitCommit, AlertTriangle } from "lucide-react";
+import { GitCommit, AlertTriangle, GitBranch, User, Boxes } from "lucide-react";
+
+export interface TraceContext {
+  repo?: string;
+  gitRef?: string;
+  user?: string;
+  sessionId?: string;
+  metadata?: { label: string; value: string }[];
+}
+
+function ContextRow({ Icon, label, value }: { Icon: typeof User; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5">
+      <Icon className="w-3 h-3 text-zinc-600 flex-shrink-0" strokeWidth={1.75} />
+      <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-zinc-500 w-14 flex-shrink-0">{label}</span>
+      <span className="font-mono text-[11px] text-zinc-200 truncate">{value}</span>
+    </div>
+  );
+}
 
 function fmtDur(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
@@ -22,8 +40,9 @@ function IOBlock({ label, text }: { label: string; text: string }) {
   );
 }
 
-export function SpanDetail({ span }: { span: DemoSpan }) {
+export function SpanDetail({ span, trace }: { span: DemoSpan; trace?: TraceContext }) {
   const m = KIND_META[span.kind];
+  const isRoot = span.parentId === null;
   return (
     <div className="h-full overflow-auto bg-[#0c0c0e]">
       <div className="flex items-center gap-2 px-4 h-9 border-b border-white/[0.06] sticky top-0 bg-[#0c0c0e] z-10">
@@ -46,6 +65,16 @@ export function SpanDetail({ span }: { span: DemoSpan }) {
             {span.status}
           </span>
         </div>
+
+        {/* Trace-level context — shown on the root span, like a real APM. */}
+        {isRoot && trace && (trace.repo || trace.gitRef || trace.user || trace.sessionId) && (
+          <div className="rounded-md border border-white/[0.06] divide-y divide-white/[0.04]">
+            {trace.repo && <ContextRow Icon={GitBranch} label="Repo" value={trace.repo} />}
+            {trace.gitRef && <ContextRow Icon={GitCommit} label="Ref" value={trace.gitRef} />}
+            {trace.user && <ContextRow Icon={User} label="User" value={trace.user} />}
+            {trace.sessionId && <ContextRow Icon={Boxes} label="Session" value={trace.sessionId} />}
+          </div>
+        )}
 
         {span.error && (
           <div className="rounded-md border border-red-500/25 bg-red-500/[0.06] px-3 py-2">
@@ -71,6 +100,20 @@ export function SpanDetail({ span }: { span: DemoSpan }) {
             ))}
           </div>
         </div>
+
+        {isRoot && trace?.metadata && trace.metadata.length > 0 && (
+          <div>
+            <MonoLabel className="block mb-2">Metadata</MonoLabel>
+            <div className="rounded-md border border-white/[0.06] divide-y divide-white/[0.04]">
+              {trace.metadata.map((a) => (
+                <div key={a.label} className="flex items-center justify-between px-3 py-1.5 gap-3">
+                  <span className="font-mono text-[11px] text-zinc-500 flex-shrink-0">{a.label}</span>
+                  <span className="font-mono text-[11px] text-zinc-200 text-right truncate">{a.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {span.git && (
           <div>

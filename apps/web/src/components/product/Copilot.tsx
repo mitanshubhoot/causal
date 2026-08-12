@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { ObservabilityDemo } from "@/lib/mock-observability";
+import { DETECTOR_LABEL } from "./ui";
 import { Sparkles, GitPullRequest, Waypoints, FileText, ArrowUp } from "lucide-react";
 
 interface Msg {
@@ -49,9 +50,17 @@ export function Copilot({
     }
     const failing = demo.spans.find((s) => s.id === demo.finding!.triggeredSpanId);
     const where = failing?.git ? ` (${failing.git.file}:${failing.git.line})` : "";
+    const f = demo.finding!;
+    const rc = demo.rootCause!;
+    const errCount = demo.spans.filter((s) => s.status === "error").length;
     return {
       role: "assistant",
-      text: `I analyzed trace ${demo.traceId}. The run failed at \`${failing?.name ?? "an unknown span"}\`${where}. ${demo.finding!.summary}\n\nRoot cause: ${demo.rootCause!.summary} — introduced in commit ${demo.rootCause!.commit}. ${demo.rootCause!.counterfactual}`,
+      text:
+        `I analyzed trace ${demo.traceId} (${demo.service}, ${demo.spans.length} spans, ${errCount} failing).\n\n` +
+        `WHAT HAPPENED\n\`${failing?.name ?? "a span"}\`${where} returned an error, and the ${DETECTOR_LABEL[f.detector]} detector fired at ${Math.round(f.confidence * 100)}%. ${f.summary}\n\n` +
+        `ROOT CAUSE — ${rc.hopsUpstream} hop${rc.hopsUpstream === 1 ? "" : "s"} upstream, ${Math.round(rc.confidence * 100)}%\n${rc.explanation}\nIntroduced in commit ${rc.commit}${rc.file ? ` (${rc.file}:${rc.line})` : ""}.\n\n` +
+        `COUNTERFACTUAL\n${rc.counterfactual}\n\n` +
+        `THE FIX\n${demo.fixPr ? `${demo.fixPr.description} → PR #${demo.fixPr.number} (${demo.fixPr.status}).` : "Proposed."}`,
     };
   }, [demo]);
 
