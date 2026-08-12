@@ -22,25 +22,25 @@ const SITE_URL = process.env["NEXT_PUBLIC_SITE_URL"] ?? "https://causal-demo.ver
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: "Causal — Root Cause Intelligence for AI Agents",
+  title: "Causal — AI-native observability and self-healing for AI agents",
   description:
-    "Trace production incidents back through agent reasoning, code, and specs in 2 minutes instead of 2 days.",
+    "Causal traces every LLM and tool call, detects failures with an LLM judge, root-causes each incident to the exact commit, and opens a verified fix PR. Observe, detect, heal.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
     apple: "/favicon.svg",
   },
   openGraph: {
-    title: "Causal — Root Cause Intelligence for AI Agents",
-    description: "Trace production incidents back through agent reasoning in 2 minutes, not 2 days.",
+    title: "Causal — AI-native observability and self-healing for AI agents",
+    description: "Trace every agent run, catch every failure, and ship the fix — automatically.",
     type: "website",
     url: SITE_URL,
     siteName: "Causal",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Causal — Root Cause Intelligence for AI Agents",
-    description: "Trace production incidents back through agent reasoning in 2 minutes, not 2 days.",
+    title: "Causal — AI-native observability and self-healing for AI agents",
+    description: "Trace every agent run, catch every failure, and ship the fix — automatically.",
   },
 };
 

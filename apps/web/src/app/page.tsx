@@ -719,12 +719,12 @@ const capabilities = {
 
 function HeroSection() {
   const items = [
-    "Automatic causal graph from every agent execution",
-    "LLM-powered root cause traversal, backwards from failure",
-    "Counterfactual scoring at every inference step",
-    "Webhook ingestion from Sentry, Datadog, PagerDuty",
-    "AI-generated postmortems in one click",
-    "Replay any incident with modified prompt or context",
+    "One decorator to instrument — OpenTelemetry Python & TS SDKs",
+    "Correlated trace tree of every LLM call, tool call, and step",
+    "Git context: each span linked to file, line, and commit",
+    "LLM-as-judge detects failures, alerts Slack & email",
+    "Agentic RCA ties the failure to the exact commit",
+    "Auto-opens a verified fix PR on GitHub",
   ];
 
   return (
@@ -752,19 +752,31 @@ function HeroSection() {
           variants={heroLines}
           initial="hidden"
           animate="visible"
-          className="font-light text-white leading-[0.95] tracking-[-0.03em]"
-          style={{ fontSize: "clamp(52px, 8.5vw, 118px)" }}
+          className="font-light text-white leading-[0.98] tracking-[-0.03em]"
+          style={{ fontSize: "clamp(40px, 6.4vw, 88px)" }}
         >
           <motion.span variants={heroLineVariant} className="block">
-            Agent failures
+            Trace every agent run.
           </motion.span>
           <motion.span variants={heroLineVariant} className="block text-white/60">
-            shouldn&apos;t be
+            Catch every failure.
           </motion.span>
           <motion.span variants={heroLineVariant} className="block gradient-text">
-            a black box.
+            Ship the fix — automatically.
           </motion.span>
         </motion.h1>
+
+        {/* Lead — what Causal is, in one breath */}
+        <motion.p
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.9, delay: 1.3, ease: EASE_OUT }}
+          className="mt-8 max-w-2xl text-[16px] sm:text-[17px] text-white/55 leading-relaxed"
+        >
+          AI-native observability and self-healing for AI agents. Add one decorator: Causal
+          traces every LLM and tool call, an LLM judge catches failures the moment they happen,
+          and an AI agent root-causes each one to the exact commit — then opens a verified fix PR.
+        </motion.p>
 
         {/* Numbered capability list */}
         <motion.div
@@ -810,7 +822,7 @@ function HeroSection() {
           </MagneticButton>
         </div>
         <p className="mt-5 font-mono text-[11px] tracking-[0.15em] text-white/45 uppercase">
-          Live demo &nbsp;·&nbsp; No signup &nbsp;·&nbsp; Real 6-layer causal traces
+          Live product demo &nbsp;·&nbsp; No signup &nbsp;·&nbsp; Real traces, detectors &amp; fix PRs
         </p>
       </motion.div>
 
@@ -871,10 +883,10 @@ function AnimatedCounter({
 
 function StatsSection() {
   const stats = [
-    { value: 6, label: "Causal model layers", prefix: "", suffix: "", decimals: 0 },
-    { value: 4, label: "Auto-link strategies", prefix: "", suffix: "", decimals: 0 },
-    { value: 6, label: "Incident sources ingested", prefix: "", suffix: "", decimals: 0 },
     { value: 1, label: "Decorator to instrument", prefix: "", suffix: "", decimals: 0 },
+    { value: 6, label: "Layers, intent → incident", prefix: "", suffix: "", decimals: 0 },
+    { value: 4, label: "Failure classes auto-detected", prefix: "", suffix: "", decimals: 0 },
+    { value: 1, label: "Failing span → verified fix", prefix: "", suffix: " PR", decimals: 0 },
   ];
 
   return (
@@ -899,7 +911,7 @@ function StatsSection() {
             <ScrambleText text="[ BY THE NUMBERS ]" className="font-mono text-[11px] tracking-[0.25em] text-white/45 uppercase" />
           </motion.p>
           <motion.h2 variants={fadeUp} className="text-[40px] sm:text-[56px] font-light tracking-[-0.03em] text-white">
-            Built for production-scale AI
+            The whole loop, automated
           </motion.h2>
         </motion.div>
 
@@ -1228,20 +1240,20 @@ function BenefitSections() {
     <>
       <BenefitSection
         num="01"
-        tag="[ BENEFIT 01 / TRACE ]"
-        headline={"Every decision\nyour agent makes,\ncaptured."}
-        sub="Add @trace to any Python agent function. Every inference step, tool call, and reasoning node is automatically woven into a deterministic causal graph."
-        body="Works with LangChain, LangGraph, AutoGen, CrewAI, and any async Python-based agent framework — no architecture changes required."
-        cta="EXPLORE SDK"
+        tag="[ 01 / OBSERVE ]"
+        headline={"Every LLM call\nand tool call,\ntraced."}
+        sub="Add @observe to any function and Causal captures a correlated trace tree and timeline for every run — token counts, cost, and latency on each span, and every span linked to the exact file, line, and commit that produced it."
+        body="OpenTelemetry-based Python and TypeScript SDKs, with adapters for LangGraph, CrewAI, LlamaIndex, OpenAI Agents, and the Claude Agent SDK."
+        cta="SEE HOW IT WORKS"
         ctaHref="#how-it-works"
         visual={<BenefitDagVisual />}
       />
       <BenefitSection
         num="02"
-        tag="[ BENEFIT 02 / DIAGNOSE ]"
-        headline={"Root cause\nfound in\nseconds."}
-        sub="When an incident fires, Causal walks the knowledge graph backwards from the failure node, scoring counterfactual derivations at every hop."
-        body="A LangGraph evaluator uses Claude to explain each deviation and assign a probability to each root-cause hypothesis — no manual digging."
+        tag="[ 02 / DETECT ]"
+        headline={"An LLM judge\ngrades every\ntrace."}
+        sub="Causal runs an LLM-as-judge over every trace, scoring for hallucination, tool and logic failures, intent drift, and safety violations. A failing verdict fires Slack and email alerts and auto-triggers root-cause analysis."
+        body="No one has to notice first — detection runs continuously on every trace in production."
         cta="SEE HOW IT WORKS"
         ctaHref="#how-it-works"
         visual={<BenefitCodeVisual />}
@@ -1249,12 +1261,12 @@ function BenefitSections() {
       />
       <BenefitSection
         num="03"
-        tag="[ BENEFIT 03 / RESOLVE ]"
-        headline={"AI postmortems,\ninstantly\ngenerated."}
-        sub="Click one button. Claude writes the full postmortem: timeline, root cause, contributing factors, counterfactual, and concrete remediation steps."
-        body="Export to Markdown or JSON. Create Linear tickets directly. Stop repeating the same agent failures across deployments."
-        cta="VIEW EXAMPLE"
-        ctaHref="#features"
+        tag="[ 03 / HEAL ]"
+        headline={"Root-caused\nto the commit.\nFixed in a PR."}
+        sub="An AI agent clones your repo in a sandbox, correlates the failing span to the exact commit and git history, and explains the cause with a counterfactual. Then it writes the fix and opens a verified GitHub PR."
+        body="Every pull request ships with a diff, a description, and a passing causal-replay check that proves the failure is gone."
+        cta="EXPLORE A LIVE INCIDENT"
+        ctaHref={`/incidents/${FEATURED_INCIDENT_ID}`}
         visual={<BenefitPostmortemVisual />}
       />
     </>
@@ -1270,30 +1282,30 @@ function HowItWorksSection() {
     {
       num: "01",
       icon: Code2,
-      title: "Instrument your agents",
-      description: "Add the @trace decorator to your agent functions. Works with LangChain, LangGraph, AutoGen, and any Python-based agent framework.",
-      code: `from causal import trace\n\n@trace(session_id=session.id)\nasync def my_agent(prompt: str):\n    ...`,
+      title: "Instrument with @observe",
+      description: "Wrap your agent in the SDK. Every LLM call, tool call, and step streams to Causal as a correlated trace — carrying the git commit that produced each span.",
+      code: `from causal import observe\n\n@observe(session_id=session.id)\nasync def booking_agent(req: str):\n    ...`,
     },
     {
       num: "02",
-      icon: GitBranch,
-      title: "Graph Propagation",
-      description: "Every execution trace populates a deterministic Neo4j knowledge graph linking the initial spec, inference steps, tool decisions, and terminal failure states.",
-      code: `# Causal structural mapping:\n# INTENT → SPEC → REASONING\n# → CODE → EXECUTION → INCIDENT`,
+      icon: Search,
+      title: "The judge grades every trace",
+      description: "An LLM-as-judge scores each trace for hallucination, tool and logic failures, drift, and safety. A failing verdict fires alerts and kicks off RCA automatically.",
+      code: `# detector verdict\n✗ tool_failure   conf 0.94\n  span: search_flights (llm.call)\n→ alert sent · rca triggered`,
     },
     {
       num: "03",
-      icon: Search,
-      title: "Telemetry Ingestion",
-      description: "When standard observability raises a symptom, Causal maps the stack trace to the exact graph session using temporal similarity and vector search.",
-      code: `# Webhook ingestion:\nPOST /webhooks/datadog\n→ session mapping: abc123\n→ graph assembly: 1.2s`,
+      icon: GitBranch,
+      title: "An agent finds the cause",
+      description: "Causal clones your repo in a sandbox, correlates the failing span to the exact commit and git history, and explains the root cause plus the counterfactual.",
+      code: `rca.run(incident_id)\n# commit a3f21c · date parsing\n# "if dates were ranged,\n#  this wouldn't have happened"`,
     },
     {
       num: "04",
       icon: Activity,
-      title: "Automated Hypothesis Testing",
-      description: "A LangGraph evaluator traverses the graph retrospectively from the failure node, utilizing LLM evaluators to score counterfactual derivations at each step.",
-      code: `pca = await perform_pca(symptom_id)\n# fault_node: "L3 inference drift"\n# derivation: "Spec ambiguity line 47"`,
+      title: "It opens the fix PR",
+      description: "Causal writes the fix and opens a verified GitHub pull request — diff, description, and a passing causal-replay check that proves the failure is gone.",
+      code: `gh pr: fix(agent): range-parse dates\n✓ checks passing\n✓ causal-replay: incident resolved`,
     },
   ];
 
@@ -1311,7 +1323,7 @@ function HowItWorksSection() {
             <ScrambleText text="[ METHODOLOGY ]" className="font-mono text-[11px] tracking-[0.2em] text-white/45 uppercase" />
           </motion.p>
           <motion.h2 variants={fadeUp} className="text-[36px] sm:text-[48px] font-light tracking-[-0.03em] text-white">
-            Continuous Causal Inference
+            From one decorator to a fix PR
           </motion.h2>
         </motion.div>
 
@@ -1394,8 +1406,8 @@ function CausalModelStrip() {
             ))}
           </motion.div>
           <p className="text-[14px] text-white/25 max-w-2xl leading-relaxed text-center">
-            Non-deterministic failures propagate linearly. Causal maps this topology,
-            allowing deterministic backwards-evaluation from the final fault to the semantic deviation origin.
+            Six layers connect a user&apos;s intent to the incident it caused. Causal reconstructs
+            the whole chain and walks it backward — turning a black-box failure into a specific commit.
           </p>
         </motion.div>
       </div>
@@ -1409,15 +1421,14 @@ function CausalModelStrip() {
 
 function FeaturesSection() {
   const features = [
-    { icon: GitBranch, title: "Knowledge Graph", description: "Neo4j-backed causal model links every incident to the exact intent, spec, reasoning step, and line of code. Query with natural language or Cypher." },
-    { icon: Cpu, title: "LangGraph RCA Engine", description: "A LangGraph StateGraph walks your causal graph backward from incident, using Claude to explain each node and generate counterfactual scenarios." },
-    { icon: Code2, title: "Python SDK", description: "@trace decorator with LangGraph, LangChain, and AutoGen adapters. Zero-config instrumentation captures reasoning steps, tool calls, and context snapshots." },
-    { icon: Webhook, title: "Webhook Integrations", description: "Ingest incidents from PagerDuty, Sentry, Datadog, and GitHub. Auto-link via session IDs, stack trace matching, or semantic similarity." },
-    { icon: FileText, title: "AI Postmortems", description: "Generate postmortems with a single click. Claude writes the timeline, root cause summary, contributing factors, and remediation steps." },
-    { icon: Search, title: "Auto-Linking", description: "Session ID propagation, stack trace parsing, time-window similarity, and vector search. Incidents find their traces — no manual tagging." },
-    { icon: Shield, title: "MCP Server", description: "Query your causal knowledge graph directly from Claude Code. Ask \"why did this agent fail\" inside your coding environment." },
-    { icon: Activity, title: "Replay & Timeline", description: "Step through a full incident replay — every reasoning decision, tool call, and state transition, visualized as an interactive DAG." },
-    { icon: Zap, title: "Counterfactual Analysis", description: "For every root cause, Causal generates \"what if\" scenarios — helping you understand blast radius and verify fixes actually work." },
+    { icon: Activity, title: "Trace tree + timeline", description: "Every run rendered as a correlated trace tree and timeline. Drill from the top-level agent step down to the raw LLM and tool call." },
+    { icon: GitBranch, title: "Git-linked spans", description: "Every span carries the file, line, and commit that produced it — so a failure is one click from the code that caused it." },
+    { icon: Shield, title: "LLM-as-judge detectors", description: "Continuous evaluation for hallucination, tool and logic failures, intent drift, and safety violations, scored on every trace." },
+    { icon: Cpu, title: "Agentic RCA", description: "An AI agent clones your repo in a sandbox, correlates the failing span to git history, and explains the cause with a counterfactual." },
+    { icon: Code2, title: "Verified fix PRs", description: "Causal writes the fix and opens a GitHub pull request — diff, description, and a passing causal-replay check that proves the incident is resolved." },
+    { icon: Zap, title: "Causal Copilot", description: "Ask any trace a question — why did this fail, what's the fix, where did the cost go. Answers grounded in your spans and git history." },
+    { icon: Search, title: "Provenance graph", description: "The six-layer chain — intent to spec to reasoning to code to execution to incident — as a navigable root-cause map for every failure." },
+    { icon: Webhook, title: "Built for your stack", description: "OpenTelemetry-based SDKs with adapters for LangGraph, CrewAI, LlamaIndex, OpenAI Agents, Vercel AI, and Claude Agent SDK. GitHub, Slack, and email included." },
   ];
 
   return (
@@ -1434,7 +1445,7 @@ function FeaturesSection() {
             [ CAPABILITIES ]
           </motion.p>
           <motion.h2 variants={fadeUp} className="text-[36px] sm:text-[48px] font-light tracking-[-0.03em] text-white">
-            Comprehensive observability
+            One tool, the whole loop
           </motion.h2>
         </motion.div>
 
@@ -1466,10 +1477,10 @@ function FeaturesSection() {
 
 function IntegrationsSection() {
   const groups = [
-    { label: "Agent Frameworks", items: ["LangChain", "LangGraph", "AutoGen", "CrewAI", "Haystack"] },
-    { label: "LLM Providers", items: ["Anthropic", "OpenAI", "Mistral", "Cohere", "Gemini"] },
-    { label: "Incident Sources", items: ["PagerDuty", "Sentry", "Datadog", "GitHub", "Linear"] },
-    { label: "Observability", items: ["LangSmith", "Langfuse", "OpenTelemetry", "Prometheus", "Grafana"] },
+    { label: "Agent Frameworks", items: ["LangGraph", "LangChain", "CrewAI", "LlamaIndex", "OpenAI Agents"] },
+    { label: "LLM Providers", items: ["Anthropic", "OpenAI", "Gemini", "Mistral", "Bedrock"] },
+    { label: "Code & Alerts", items: ["GitHub", "Slack", "Email", "Linear"] },
+    { label: "Standards & SDKs", items: ["OpenTelemetry", "Python SDK", "TypeScript SDK", "Vercel AI SDK", "Claude Agent SDK"] },
   ];
 
   return (
@@ -1675,16 +1686,16 @@ function CTASection() {
           className="text-[44px] sm:text-[64px] font-light tracking-[-0.04em] text-white leading-[1.05] mb-8"
         >
           <motion.span variants={fadeUp} className="block">
-            Start tracing your
+            Ship agents you can
           </motion.span>
           <motion.span variants={fadeUp} className="block gradient-text">
-            agents today.
+            actually fix.
           </motion.span>
         </motion.h2>
 
         <motion.p variants={fadeUp} className="text-[16px] text-white/30 mb-14 leading-relaxed max-w-md mx-auto font-light">
-          Add one decorator. Get the full causal graph.
-          Stop spending days diagnosing agent failures.
+          Add one decorator and Causal takes it from there — tracing every run, catching the
+          failures, and opening the verified fix PR. Explore a live incident, no signup required.
         </motion.p>
 
         <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -1697,7 +1708,7 @@ function CTASection() {
         </motion.div>
 
         <motion.p variants={fadeUp} className="mt-10 font-mono text-[11px] tracking-[0.15em] text-white/45 uppercase">
-          Open beta &nbsp;·&nbsp; No signup &nbsp;·&nbsp; Explore real causal traces
+          Live product demo &nbsp;·&nbsp; No signup &nbsp;·&nbsp; Real traces, detectors &amp; fix PRs
         </motion.p>
       </motion.div>
     </section>

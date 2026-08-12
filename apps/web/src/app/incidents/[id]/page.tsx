@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Activity, Eye, LayoutGrid, Github, Search, ChevronDown, X, Waypoints, ScanSearch,
-  ArrowLeft, ListTree, GanttChart,
+  ArrowLeft, ListTree, GanttChart, ShieldAlert,
 } from "lucide-react";
 import { ProvenanceExplorer } from "@/components/ProvenanceExplorer";
 import { getMockTrace } from "@/lib/mock-data";
@@ -16,7 +16,7 @@ import { SpanDetail } from "@/components/product/SpanDetail";
 import { Copilot } from "@/components/product/Copilot";
 import { FixPrView } from "@/components/product/panels";
 import { DetectorsView, DashboardView } from "@/components/product/views";
-import { SeverityChip, STATUS_META, CopyButton } from "@/components/product/ui";
+import { SeverityChip, STATUS_META, CopyButton, DETECTOR_LABEL } from "@/components/product/ui";
 
 interface PageProps {
   params: { id: string };
@@ -55,6 +55,18 @@ export default function IncidentPage({ params }: PageProps) {
   useEffect(() => {
     setSelectedSpanId(defaultSpanId(getObservabilityDemo(activeId)));
   }, [activeId]);
+
+  // Esc closes any open modal / dropdown.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setModal(null);
+        setWsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const openIncident = (id: string) => {
     setActiveId(id);
@@ -241,6 +253,19 @@ export default function IncidentPage({ params }: PageProps) {
               <span>{demo.model}</span>
               <span className="ml-auto text-zinc-600">{demo.spans.length} spans</span>
             </div>
+            {demo.finding && (
+              <button
+                onClick={() => { setTreeMode("trace"); setSelectedSpanId(demo.finding!.triggeredSpanId); }}
+                className="flex items-center gap-2 px-4 h-8 border-b border-red-500/15 bg-red-500/[0.04] text-left flex-shrink-0 hover:bg-red-500/[0.07] transition-colors"
+              >
+                <ShieldAlert className="w-3 h-3 text-red-400 flex-shrink-0" />
+                <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-red-400/90 font-semibold flex-shrink-0">
+                  {DETECTOR_LABEL[demo.finding.detector]}
+                </span>
+                <span className="text-[11px] text-zinc-400 truncate">{demo.finding.title}</span>
+                <span className="ml-auto font-mono text-[10px] text-zinc-500 flex-shrink-0">{Math.round(demo.finding.confidence * 100)}%</span>
+              </button>
+            )}
             <div className="flex-1 overflow-auto">
               {treeMode === "trace" ? (
                 <TraceTree spans={demo.spans} selectedId={selectedSpanId} onSelect={setSelectedSpanId} />
