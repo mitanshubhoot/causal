@@ -24,6 +24,11 @@ export interface IngestTrace {
   tokensOut?: number;
   cost?: number;
   startedAt?: string;
+  repo?: string;
+  gitRef?: string;
+  user?: string;
+  sessionId?: string;
+  metadata?: { label: string; value: string }[];
   spans: IngestSpan[];
 }
 
@@ -51,11 +56,13 @@ export async function ingestTrace(fastify: FastifyInstance, orgId: string, t: In
     await sql`DELETE FROM traces WHERE id = ${t.traceId} AND org_id = ${orgId}`;
 
     await sql`
-      INSERT INTO traces (id, org_id, service, environment, root_name, status, model, tokens_in, tokens_out, cost, span_count, started_at)
+      INSERT INTO traces (id, org_id, service, environment, root_name, status, model, tokens_in, tokens_out, cost, span_count, repo, git_ref, user_id, session_id, metadata, started_at)
       VALUES (
         ${t.traceId}, ${orgId}, ${t.service}, ${t.environment ?? "production"},
         ${root?.name ?? null}, ${status}, ${t.model ?? null},
-        ${t.tokensIn ?? 0}, ${t.tokensOut ?? 0}, ${t.cost ?? 0}, ${spans.length}, ${startedAt}
+        ${t.tokensIn ?? 0}, ${t.tokensOut ?? 0}, ${t.cost ?? 0}, ${spans.length},
+        ${t.repo ?? null}, ${t.gitRef ?? null}, ${t.user ?? null}, ${t.sessionId ?? null},
+        ${sql.json(t.metadata ?? [])}, ${startedAt}
       )
     `;
 
@@ -112,7 +119,8 @@ export async function listTraces(fastify: FastifyInstance, orgId: string, limit 
 /** Fetch a trace with its spans and (if any) its detector finding. */
 export async function getTrace(fastify: FastifyInstance, orgId: string, traceId: string): Promise<Record<string, unknown> | null> {
   const traceRows = (await fastify.pg`
-    SELECT id, service, environment, root_name, status, model, tokens_in, tokens_out, cost, span_count, started_at
+    SELECT id, service, environment, root_name, status, model, tokens_in, tokens_out, cost, span_count,
+           repo, git_ref, user_id, session_id, metadata, started_at
     FROM traces
     WHERE id = ${traceId} AND org_id = ${orgId}
     LIMIT 1
@@ -146,6 +154,11 @@ export async function getTrace(fastify: FastifyInstance, orgId: string, traceId:
     tokensIn: Number(trace["tokens_in"]),
     tokensOut: Number(trace["tokens_out"]),
     cost: Number(trace["cost"]),
+    repo: trace["repo"] ?? undefined,
+    gitRef: trace["git_ref"] ?? undefined,
+    user: trace["user_id"] ?? undefined,
+    sessionId: trace["session_id"] ?? undefined,
+    metadata: trace["metadata"] ?? [],
     startedAt: trace["started_at"],
     spans: spanRows.map((s) => ({
       id: s["id"],

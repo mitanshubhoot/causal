@@ -33,6 +33,11 @@ export function mapLiveToDemo(detail: Record<string, unknown>, rca: Record<strin
     tokensIn: Number(detail["tokensIn"] ?? 0),
     tokensOut: Number(detail["tokensOut"] ?? 0),
     cost: Number(detail["cost"] ?? 0),
+    repo: (detail["repo"] as string) ?? undefined,
+    gitRef: (detail["gitRef"] as string) ?? undefined,
+    user: (detail["user"] as string) ?? undefined,
+    sessionId: (detail["sessionId"] as string) ?? undefined,
+    metadata: (detail["metadata"] as { label: string; value: string }[]) ?? [],
     spans,
     finding: finding
       ? {

@@ -22,6 +22,11 @@ export interface CausalTracerOptions {
   orgId?: string;
   environment?: string;
   model?: string;
+  repo?: string;
+  gitRef?: string;
+  user?: string;
+  sessionId?: string;
+  metadata?: { label: string; value: string }[];
 }
 
 export interface SpanEndOptions {
@@ -127,6 +132,11 @@ export class CausalTrace {
       tokensIn: this.tokensIn,
       tokensOut: this.tokensOut,
       cost: this.cost,
+      repo: this.tracer.repo,
+      gitRef: this.tracer.gitRef,
+      user: this.tracer.user,
+      sessionId: this.tracer.sessionId,
+      metadata: this.tracer.metadata,
       startedAt: new Date(this.start).toISOString(),
       spans: this.spans.map((s) => ({ ...s })),
     };
@@ -137,6 +147,11 @@ export class CausalTracer {
   readonly service: string;
   readonly environment: string;
   readonly model?: string;
+  readonly repo?: string;
+  readonly gitRef?: string;
+  readonly user?: string;
+  readonly sessionId?: string;
+  readonly metadata?: { label: string; value: string }[];
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly orgId: string;
@@ -145,6 +160,11 @@ export class CausalTracer {
     this.service = opts.service;
     this.environment = opts.environment ?? "production";
     this.model = opts.model;
+    this.repo = opts.repo;
+    this.gitRef = opts.gitRef;
+    this.user = opts.user;
+    this.sessionId = opts.sessionId;
+    this.metadata = opts.metadata;
     this.apiKey = opts.apiKey ?? process.env["CAUSAL_API_KEY"] ?? "";
     this.baseUrl = (opts.baseUrl ?? process.env["CAUSAL_API_URL"] ?? "http://localhost:3001").replace(/\/$/, "");
     this.orgId = opts.orgId ?? process.env["CAUSAL_ORG_ID"] ?? "default";

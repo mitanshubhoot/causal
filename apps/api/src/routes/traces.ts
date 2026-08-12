@@ -29,6 +29,11 @@ const IngestSchema = z.object({
   tokensOut: z.number().int().nonnegative().optional(),
   cost: z.number().nonnegative().optional(),
   startedAt: z.string().optional(),
+  repo: z.string().optional(),
+  gitRef: z.string().optional(),
+  user: z.string().optional(),
+  sessionId: z.string().optional(),
+  metadata: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
   spans: z.array(SpanSchema).max(2000),
 });
 

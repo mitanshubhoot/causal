@@ -16,6 +16,12 @@ CREATE TABLE IF NOT EXISTS traces (
   tokens_out   INTEGER NOT NULL DEFAULT 0,
   cost         NUMERIC(12, 6) NOT NULL DEFAULT 0,
   span_count   INTEGER NOT NULL DEFAULT 0,
+  -- trace-level context (repo/ref/user/session + freeform metadata)
+  repo         TEXT,
+  git_ref      TEXT,
+  user_id      TEXT,
+  session_id   TEXT,
+  metadata     JSONB NOT NULL DEFAULT '[]'::jsonb,
   started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   ingested_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
