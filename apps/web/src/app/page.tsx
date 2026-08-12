@@ -21,6 +21,7 @@ import {
   Zap,
   FileText,
   Cpu,
+  Database,
   ExternalLink,
 } from "lucide-react";
 import {
@@ -1270,6 +1271,17 @@ function BenefitSections() {
         ctaHref={`/incidents/${FEATURED_INCIDENT_ID}`}
         visual={<BenefitPostmortemVisual />}
       />
+      <BenefitSection
+        num="04"
+        tag="[ 04 / IMPROVE ]"
+        headline={"Every fix,\nverified —\nand kept fixed."}
+        sub="A confirmed failure becomes a golden case in one click. Every release is re-run against the whole set, so a fix is proven and a regression can't quietly come back."
+        body="Online detection and offline evaluation in one loop — run from the CLI or from inside Claude Code, Cursor, or Codex. Release over release, your agent gets measurably more robust."
+        cta="SEE THE EVAL LOOP"
+        ctaHref={`/incidents/${FEATURED_INCIDENT_ID}`}
+        visual={<BenefitDagVisual />}
+        flip
+      />
     </>
   );
 }
@@ -1452,12 +1464,15 @@ function FeaturesSection() {
   const features = [
     { icon: Activity, title: "Trace tree + timeline", description: "Every run rendered as a correlated trace tree and timeline. Drill from the top-level agent step down to the raw LLM and tool call." },
     { icon: GitBranch, title: "Git-linked spans", description: "Every span carries the file, line, and commit that produced it — so a failure is one click from the code that caused it." },
-    { icon: Shield, title: "LLM-as-judge detectors", description: "Continuous evaluation for hallucination, tool and logic failures, intent drift, and safety violations, scored on every trace." },
-    { icon: Cpu, title: "Agentic RCA", description: "An AI agent clones your repo in a sandbox, correlates the failing span to git history, and explains the cause with a counterfactual." },
-    { icon: Code2, title: "Verified fix PRs", description: "Causal writes the fix and opens a GitHub pull request — diff, description, and a passing causal-replay check that proves the incident is resolved." },
-    { icon: Zap, title: "Causal Copilot", description: "Ask any trace a question — why did this fail, what's the fix, where did the cost go. Answers grounded in your spans and git history." },
-    { icon: Search, title: "Provenance graph", description: "The six-layer chain — intent to spec to reasoning to code to execution to incident — as a navigable root-cause map for every failure." },
+    { icon: Search, title: "Signal, not noise", description: "Traces are scored on error, latency, cost, retry loops and whether a failure is actionable. The ones that matter surface; the rest are sampled away." },
+    { icon: Shield, title: "LLM-as-judge detectors", description: "Continuous evaluation for hallucination, tool and logic failures, intent drift, and safety violations — scored on every trace, not just the ones that already errored." },
+    { icon: Cpu, title: "Agentic RCA", description: "An AI agent works in a sandbox with your source: real git blame and pickaxe to find the commit that introduced the failure, explained with a counterfactual." },
+    { icon: GitBranch, title: "Commits, PRs and issues", description: "A failure is correlated not just to the commit but to the pull request that shipped it, the issues it closed, and open issues that already describe it." },
+    { icon: Code2, title: "Verified fix PRs", description: "Causal writes the fix and opens a pull request — diff, description, and a causal-replay check that runs your tests against the patch before claiming it's resolved." },
+    { icon: Zap, title: "Causal Copilot", description: "Ask any trace a question — why did this fail, what's the fix, where did the cost go. Answers grounded in your spans, RCA and git history." },
+    { icon: Database, title: "Datasets & evals", description: "Turn a production finding into a golden case in one click, then re-run every release against it — so a fix is verified and a regression can't come back unnoticed." },
     { icon: FileText, title: "Token & cost accounting", description: "Tokens and spend recorded per span and rolled up through every parent, so you can see exactly which agent step, retry, or sub-agent burned the budget." },
+    { icon: Shield, title: "Bring your own model", description: "Anthropic, OpenAI, Gemini, xAI, DeepSeek, OpenRouter, Kimi, GLM or Bedrock — per workspace, per purpose. Keys are encrypted at rest and never leave your org." },
     { icon: Webhook, title: "Built for your stack", description: "OpenTelemetry-based SDKs with adapters for LangGraph, CrewAI, LlamaIndex, OpenAI Agents, Vercel AI, and Claude Agent SDK. GitHub, Slack, and email included." },
   ];
 
