@@ -6,6 +6,7 @@ import { FEATURED_INCIDENT_ID } from "@/lib/mock-data";
 import { ScrambleText } from "@/components/ScrambleText";
 import { LandingTraceDemo } from "@/components/LandingTraceDemo";
 import { FailureTicker } from "@/components/FailureTicker";
+import { InstallWidget } from "@/components/InstallWidget";
 import { MagneticButton } from "@/components/MagneticButton";
 import {
   ArrowRight,
@@ -1363,6 +1364,34 @@ function HowItWorksSection() {
 // CAUSAL MODEL STRIP
 // ─────────────────────────────────────────────────────────────────────────────
 
+function InstallSection() {
+  return (
+    <section className="py-24 px-8 border-b border-white/[0.06]">
+      <div className="max-w-7xl mx-auto">
+        <motion.div
+          variants={staggerContainer}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-80px" }}
+          className="mb-10 text-center"
+        >
+          <motion.p variants={fadeUp} className="mb-4">
+            <ScrambleText text="[ GET INSTRUMENTED ]" className="font-mono text-[11px] tracking-[0.25em] text-white/45 uppercase" />
+          </motion.p>
+          <motion.h2 variants={fadeUp} className="text-[34px] sm:text-[46px] font-light tracking-[-0.03em] text-white leading-tight">
+            Instrumented in one line
+          </motion.h2>
+          <motion.p variants={fadeUp} className="mt-3 text-[15px] text-white/45 max-w-xl mx-auto">
+            Install the CLI, hand the prompt to your coding agent, or drop in the Agent Skills —
+            your agent wires up tracing for you.
+          </motion.p>
+        </motion.div>
+        <InstallWidget />
+      </div>
+    </section>
+  );
+}
+
 function CausalModelStrip() {
   const layers = [
     { label: "INTENT", color: "#7c3aed" },
@@ -1817,6 +1846,7 @@ export default function HomePage() {
         <Nav />
         <HeroSection />
         <FailureTicker />
+        <InstallSection />
         <LandingTraceDemo />
         <StatsSection />
         <BenefitSections />
