@@ -1,7 +1,7 @@
 "use client";
 
 import type { DemoSpan } from "@/lib/mock-observability";
-import { KIND_META, STATUS_META, MonoLabel } from "./ui";
+import { KIND_META, STATUS_META, MonoLabel, CopyButton } from "./ui";
 import { GitCommit, AlertTriangle } from "lucide-react";
 
 function fmtDur(ms: number): string {
@@ -29,6 +29,7 @@ export function SpanDetail({ span }: { span: DemoSpan }) {
       <div className="flex items-center gap-2 px-4 h-9 border-b border-white/[0.06] sticky top-0 bg-[#0c0c0e] z-10">
         <m.Icon className={`w-3.5 h-3.5 ${m.tone}`} strokeWidth={1.75} />
         <span className="font-mono text-[12px] text-zinc-200 truncate">{span.name}</span>
+        <CopyButton value={span.name} className="ml-auto flex-shrink-0" />
       </div>
 
       <div className="p-4 space-y-4">

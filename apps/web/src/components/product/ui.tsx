@@ -6,8 +6,9 @@
  * status (red=error, amber=warn, emerald=pass). No neon, no gradients.
  */
 
+import { useState } from "react";
 import type { SpanKind, SpanStatus, DetectorType } from "@/lib/mock-observability";
-import { Bot, Brain, Wrench, Globe, Database, Code2 } from "lucide-react";
+import { Bot, Brain, Wrench, Globe, Database, Code2, Copy, Check } from "lucide-react";
 
 export const SURFACE = "bg-[#0a0a0b]";
 export const PANEL = "bg-[#0f0f11] border border-white/[0.06]";
@@ -65,6 +66,26 @@ export function KindBadge({ kind }: { kind: SpanKind }) {
 export function MonoLabel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <span className={`font-mono text-[10px] tracking-[0.14em] uppercase text-zinc-500 ${className}`}>{children}</span>
+  );
+}
+
+/** One-click copy button with a transient check state. */
+export function CopyButton({ value, className = "" }: { value: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard?.writeText(value).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        });
+      }}
+      title="Copy"
+      className={`text-zinc-600 hover:text-zinc-300 transition-colors ${className}`}
+    >
+      {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+    </button>
   );
 }
 

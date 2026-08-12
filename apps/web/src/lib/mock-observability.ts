@@ -479,6 +479,11 @@ export function getObservabilityDemo(incidentId: string): ObservabilityDemo {
   return DEMOS[incidentId] ?? DEMO_I4;
 }
 
+/** All demos, featured incident first — for the detectors + dashboard views. */
+export function getAllDemos(): ObservabilityDemo[] {
+  return [DEMO_I4, DEMO_I2, DEMO_I1, DEMO_I3];
+}
+
 export function hasObservabilityDemo(incidentId: string): boolean {
   return incidentId in DEMOS;
 }
