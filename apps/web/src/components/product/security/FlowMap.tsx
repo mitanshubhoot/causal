@@ -36,7 +36,7 @@
  *     reproduce the attack.
  */
 
-import { useCallback, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Capability, FlowNode, Origin, SecurityEvent } from "@/lib/security-types";
 import type { SpanKind } from "@/lib/mock-observability";
 import { CopyButton, KIND_META, MonoLabel, PANEL } from "../ui";
@@ -64,6 +64,7 @@ import {
   EyeOff,
   ExternalLink,
   Lock,
+  RotateCw,
   ShieldCheck,
   UserCheck,
   X,
@@ -94,6 +95,16 @@ const LANE_HEADER_H = 48;
 const PAD_TOP = LANE_HEADER_H + 18;
 const PAD_BOTTOM = 28;
 const CANVAS_W = PAD_X * 2 + NODE_W * 3 + LANE_GAP * 2;
+/**
+ * Floors for the two horizontal measurements. Panes never collapse — controls
+ * shrink — so a container narrower than CANVAS_W does not hide the SINKS lane
+ * behind an invisible overlay scrollbar; the empty gap between lanes gives way
+ * first (it carries nothing), then the node box, down to a width that still
+ * fits a span name and its two chips. Only below both floors does the canvas
+ * scroll, and then the edge fade says so out loud.
+ */
+const LANE_GAP_MIN = 56;
+const NODE_W_MIN = 176;
 const TIP_W = 312;
 /** Floor for the canvas: `overflow-x-auto` forces overflow-y to auto, so a hover
  *  card taller than a two-node graph would be clipped. Lanes simply run longer. */
@@ -226,15 +237,44 @@ interface GEdge {
   my: number;
 }
 
-function laneX(laneIdx: number): number {
-  return PAD_X + NODE_W / 2 + laneIdx * (NODE_W + LANE_GAP);
+/** The horizontal measurements, resolved against the width actually available. */
+export interface FlowLayout {
+  nodeW: number;
+  laneGap: number;
+  canvasW: number;
+}
+
+const BASE_LAYOUT: FlowLayout = { nodeW: NODE_W, laneGap: LANE_GAP, canvasW: CANVAS_W };
+
+function canvasWidth(nodeW: number, laneGap: number): number {
+  return PAD_X * 2 + nodeW * 3 + laneGap * 2;
+}
+
+/**
+ * Shrink to fit, in the order that costs the least information: the lane gap is
+ * whitespace, the node box is content. `available <= 0` is the first paint,
+ * before the container has been measured — draw at full size and let the effect
+ * correct it, so the server and the client agree on the first frame.
+ */
+export function layoutFor(available: number): FlowLayout {
+  if (available <= 0 || available >= CANVAS_W) return BASE_LAYOUT;
+  const laneGap = Math.max(LANE_GAP_MIN, Math.floor((available - PAD_X * 2 - NODE_W * 3) / 2));
+  let nodeW = NODE_W;
+  if (canvasWidth(nodeW, laneGap) > available) {
+    nodeW = Math.max(NODE_W_MIN, Math.floor((available - PAD_X * 2 - laneGap * 2) / 3));
+  }
+  return { nodeW, laneGap, canvasW: canvasWidth(nodeW, laneGap) };
+}
+
+function laneX(laneIdx: number, layout: FlowLayout): number {
+  return PAD_X + layout.nodeW / 2 + laneIdx * (layout.nodeW + layout.laneGap);
 }
 
 function rowY(row: number): number {
   return PAD_TOP + NODE_H / 2 + row * (NODE_H + ROW_GAP);
 }
 
-function edgePath(a: GNode, b: GNode): { d: string; mx: number; my: number } {
+function edgePath(a: GNode, b: GNode, layout: FlowLayout): { d: string; mx: number; my: number } {
   if (a.laneIdx === b.laneIdx) {
     const y1 = a.y + (b.y > a.y ? NODE_H / 2 : -NODE_H / 2);
     const y2 = b.y + (b.y > a.y ? -NODE_H / 2 : NODE_H / 2);
@@ -246,8 +286,8 @@ function edgePath(a: GNode, b: GNode): { d: string; mx: number; my: number } {
     };
   }
   const dir = b.laneIdx > a.laneIdx ? 1 : -1;
-  const x1 = a.x + (dir * NODE_W) / 2;
-  const x2 = b.x - (dir * NODE_W) / 2;
+  const x1 = a.x + (dir * layout.nodeW) / 2;
+  const x2 = b.x - (dir * layout.nodeW) / 2;
   const k = Math.min(150, Math.max(44, Math.abs(x2 - x1) * 0.5));
   const c1 = x1 + dir * k;
   const c2 = x2 - dir * k;
@@ -294,9 +334,11 @@ export interface FlowGraph {
   witnessedEdges: Set<string>;
   bySpanId: Map<string, number>;
   laneCounts: Record<Lane, number>;
+  /** The measurements every coordinate above was computed against. */
+  layout: FlowLayout;
 }
 
-export function buildFlowGraph(event: SecurityEvent): FlowGraph {
+export function buildFlowGraph(event: SecurityEvent, layout: FlowLayout = BASE_LAYOUT): FlowGraph {
   const nodes: GNode[] = [];
   const bySpanId = new Map<string, number>();
   const laneCounts: Record<Lane, number> = { source: 0, context: 0, sink: 0 };
@@ -320,7 +362,7 @@ export function buildFlowGraph(event: SecurityEvent): FlowGraph {
       lane,
       laneIdx,
       row: index,
-      x: laneX(laneIdx),
+      x: laneX(laneIdx, layout),
       y: rowY(index),
     });
     laneCounts[lane] += 1;
@@ -337,7 +379,7 @@ export function buildFlowGraph(event: SecurityEvent): FlowGraph {
     if (from === to) continue;
     const a = nodes[from];
     const b = nodes[to];
-    const geom = edgePath(a, b);
+    const geom = edgePath(a, b, layout);
     edges.push({ key: `${from}-${to}-${i}`, from, to, bytes: b.node.bytes, ...geom });
     fwd[from].push(to);
     bwd[to].push(from);
@@ -413,6 +455,7 @@ export function buildFlowGraph(event: SecurityEvent): FlowGraph {
     witnessedEdges,
     bySpanId,
     laneCounts,
+    layout,
   };
 }
 
@@ -427,9 +470,9 @@ const STROKE_VIOLATION = "rgba(239,68,68,0.9)";
 type Direction = "forward" | "backward" | "both";
 
 const DIRECTION_META: Record<Direction, { label: string; hint: string; Icon: LucideIcon }> = {
-  forward: { label: "FORWARD", hint: "everything these bytes provably reached", Icon: ArrowRight },
-  backward: { label: "BACKWARD", hint: "everything that could have written these bytes", Icon: ArrowLeft },
-  both: { label: "BOTH", hint: "everything upstream and everything downstream", Icon: ArrowLeftRight },
+  forward: { label: "Forward", hint: "everything these bytes provably reached", Icon: ArrowRight },
+  backward: { label: "Backward", hint: "everything that could have written these bytes", Icon: ArrowLeft },
+  both: { label: "Both", hint: "everything upstream and everything downstream", Icon: ArrowLeftRight },
 };
 
 function defaultDirection(lane: Lane): Direction {
@@ -471,7 +514,34 @@ type Hover = { kind: "node"; index: number } | { kind: "edge"; key: string } | n
 
 export function FlowMap({ event, onOpenTrace, className = "" }: FlowMapProps) {
   const uid = useId().replace(/:/g, "");
-  const graph = useMemo(() => buildFlowGraph(event), [event]);
+
+  // The canvas is laid out against the width the scroll viewport actually has,
+  // not against a constant — and hover cards are placed against the part of it
+  // that is on screen, since a card is dismissed by the very scroll that would
+  // bring it into view.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [view, setView] = useState({ width: 0, scrollLeft: 0 });
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () =>
+      setView((cur) =>
+        cur.width === el.clientWidth && cur.scrollLeft === el.scrollLeft
+          ? cur
+          : { width: el.clientWidth, scrollLeft: el.scrollLeft },
+      );
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    el.addEventListener("scroll", measure, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", measure);
+    };
+  }, []);
+
+  const layout = useMemo(() => layoutFor(view.width), [view.width]);
+  const graph = useMemo(() => buildFlowGraph(event, layout), [event, layout]);
 
   const [reveal, setReveal] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
@@ -509,6 +579,18 @@ export function FlowMap({ event, onOpenTrace, className = "" }: FlowMapProps) {
     setDirection(null);
   }, []);
 
+  // Escape clears the highlighter wherever focus went — clicking a node moves
+  // focus to the node button, but clicking the page background moves it to
+  // <body>, and a handler on a non-focusable div never hears that key.
+  useEffect(() => {
+    if (selected === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clear();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selected, clear]);
+
   const cycleDirection = useCallback(() => {
     setDirection((cur) => {
       const from = cur ?? (anchorNode === null ? "forward" : defaultDirection(anchorNode.lane));
@@ -535,13 +617,15 @@ export function FlowMap({ event, onOpenTrace, className = "" }: FlowMapProps) {
   const hoveredNode = hover?.kind === "node" ? graph.nodes[hover.index] ?? null : null;
   const hoveredEdge = hover?.kind === "edge" ? graph.edges.find((e) => e.key === hover.key) ?? null : null;
 
+  // The horizontal band a hover card may occupy: what is on screen right now,
+  // never wider than the canvas it is positioned inside.
+  const visibleW = view.width > 0 ? Math.min(view.width, layout.canvasW) : layout.canvasW;
+  const cardBounds = { min: view.scrollLeft + 8, max: view.scrollLeft + visibleW - 8 };
+  const overflowsLeft = view.scrollLeft > 1;
+  const overflowsRight = view.width > 0 && view.scrollLeft + view.width < layout.canvasW - 1;
+
   return (
-    <div
-      className={`${PANEL} rounded-lg overflow-hidden ${className}`}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") clear();
-      }}
-    >
+    <div className={`${PANEL} rounded-lg overflow-hidden ${className}`}>
       <style>{`
         @keyframes causal-flowmap-march { to { stroke-dashoffset: -28; } }
         .causal-flowmap-march { animation: causal-flowmap-march 1.6s linear infinite; }
@@ -556,37 +640,51 @@ export function FlowMap({ event, onOpenTrace, className = "" }: FlowMapProps) {
         <span className="font-mono text-[11px] text-zinc-500">
           {event.ruleId} v{event.ruleVersion}
         </span>
-        <ClassChip eventClass={event.eventClass} />
+        {/* The class and the outcome can both read `blocked`, and they mean two
+            different things, so each carries the name of what it is. */}
+        <span className="inline-flex items-center gap-1">
+          <MonoLabel>class</MonoLabel>
+          <ClassChip eventClass={event.eventClass} />
+        </span>
         <SeverityBadge severity={event.severity} />
-        <OutcomeChip outcome={event.outcome} />
+        <span className="inline-flex items-center gap-1">
+          <MonoLabel>outcome</MonoLabel>
+          <OutcomeChip outcome={event.outcome} />
+        </span>
         <TierChip tier={event.tier} />
 
         <div className="ml-auto flex items-center gap-1.5">
+          {graph.dormantTaint.size === 0 && (
+            <span className="font-mono text-[10px] text-zinc-500">
+              nothing suppressed here
+            </span>
+          )}
           <button
             onClick={() => setReveal((v) => !v)}
             disabled={graph.dormantTaint.size === 0}
+            aria-pressed={reveal}
             title={
               graph.dormantTaint.size === 0
                 ? "Nothing is suppressed on this graph — every untrusted node here reaches a capability sink."
                 : "Dormant taint — untrusted bytes that reach no capability sink — is suppressed by default so the one path that matters is the only thing shouting."
             }
-            className={`inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.08em] px-2 py-1 rounded border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/70 disabled:opacity-40 disabled:cursor-default ${
+            className={`inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.08em] px-2 py-1.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-default ${
               reveal
                 ? "text-amber-300 border-amber-500/30 bg-amber-500/[0.08]"
-                : "text-zinc-500 border-white/10 bg-white/[0.03] enabled:hover:text-zinc-300"
+                : "text-zinc-400 border-white/10 bg-white/[0.03] enabled:hover:text-zinc-200 enabled:hover:border-white/20"
             }`}
           >
             {reveal ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-            REVEAL ALL TAINT
-            <span className="text-zinc-600 tabular-nums">{graph.dormantTaint.size}</span>
+            Reveal all taint
+            <span className="text-zinc-500 tabular-nums">{graph.dormantTaint.size}</span>
           </button>
           {onOpenTrace && explorerIncidentFor(event.traceId) && (
             <button
               onClick={() => onOpenTrace(event.traceId)}
-              className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.08em] px-2 py-1 rounded border border-white/10 bg-white/[0.03] text-zinc-400 hover:text-zinc-200 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/70"
+              className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.08em] px-2 py-1.5 rounded border border-white/10 bg-white/[0.03] text-zinc-400 hover:text-zinc-200 hover:border-white/20 transition-colors"
             >
               <ExternalLink className="w-3 h-3" />
-              TRACE {event.traceId.slice(0, 8)}
+              Trace {event.traceId.slice(0, 8)}
             </button>
           )}
         </div>
@@ -597,296 +695,331 @@ export function FlowMap({ event, onOpenTrace, className = "" }: FlowMapProps) {
         <p className="text-[13px] text-zinc-200 leading-snug">{defangProse(event.title)}</p>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1">
           <span className="font-mono text-[10.5px] text-zinc-500">{event.agent}</span>
-          <span className="font-mono text-[10.5px] text-zinc-600">{event.environment}</span>
-          {event.tool && <span className="font-mono text-[10.5px] text-zinc-600">{event.tool}</span>}
-          <span className="font-mono text-[10.5px] text-zinc-600 tabular-nums">{event.timestamp.slice(11, 19)} UTC</span>
+          <span className="font-mono text-[10.5px] text-zinc-400">{event.environment}</span>
+          {event.tool && <span className="font-mono text-[10.5px] text-zinc-400">{event.tool}</span>}
+          <span className="font-mono text-[10.5px] text-zinc-400 tabular-nums">{event.timestamp.slice(11, 19)} UTC</span>
         </div>
       </div>
 
       {/* ── graph ───────────────────────────────────────────────── */}
-      <div className="overflow-x-auto">
-        <div className="relative" style={{ width: CANVAS_W, height: graph.height }}>
-          {/* lane bands + headers */}
-          {LANES.map((lane, i) => {
-            const count = graph.laneCounts[lane];
-            return (
-              <div
-                key={lane}
-                className="absolute top-0 bottom-0 border-x border-white/[0.035] bg-white/[0.012]"
-                style={{ left: laneX(i) - NODE_W / 2 - 14, width: NODE_W + 28 }}
-              >
-                {/* Fixed height so nodes can never be laid out over the caption. */}
-                <div className="px-2 pt-2 overflow-hidden" style={{ height: LANE_HEADER_H }}>
-                  <div className="flex items-baseline gap-1.5">
-                    <MonoLabel className={count === 0 ? "text-zinc-700" : "text-zinc-500"}>{LANE_TITLE[lane]}</MonoLabel>
-                    <span className="font-mono text-[10px] text-zinc-700 tabular-nums">{count}</span>
+      <div className="relative">
+        <div ref={scrollRef} className="overflow-x-auto">
+          <div className="relative" style={{ width: layout.canvasW, height: graph.height }}>
+            {/* lane bands + headers */}
+            {LANES.map((lane, i) => {
+              const count = graph.laneCounts[lane];
+              return (
+                <div
+                  key={lane}
+                  className="absolute top-0 bottom-0 border-x border-white/[0.035] bg-white/[0.012]"
+                  style={{ left: laneX(i, layout) - layout.nodeW / 2 - 14, width: layout.nodeW + 28 }}
+                >
+                  {/* Fixed height so nodes can never be laid out over the caption. */}
+                  <div className="px-2 pt-2 overflow-hidden" style={{ height: LANE_HEADER_H }}>
+                    <div className="flex items-baseline gap-1.5">
+                      {/* MonoLabel's own text-zinc-500 wins over any lighter tone
+                          passed in, so the caption carries its colour itself. */}
+                      <MonoLabel>{LANE_TITLE[lane]}</MonoLabel>
+                      <span className="font-mono text-[10px] text-zinc-400 tabular-nums">{count}</span>
+                    </div>
+                    <span
+                      className="block font-mono text-[9px] text-zinc-400 leading-tight mt-0.5"
+                      style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden" }}
+                      title={LANE_HINT[lane]}
+                    >
+                      {LANE_HINT[lane]}
+                    </span>
                   </div>
-                  <span
-                    className="block font-mono text-[9px] text-zinc-700 leading-tight mt-0.5"
-                    style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden" }}
-                  >
-                    {LANE_HINT[lane]}
-                  </span>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
 
-          {/* edges */}
-          <svg
-            width={CANVAS_W}
-            height={graph.height}
-            className="absolute inset-0"
-            style={{ pointerEvents: "none" }}
-            aria-hidden
-          >
-            <defs>
-              {[
-                ["neutral", "rgba(228,228,231,0.34)"],
-                ["taint", STROKE_TAINT],
-                ["violation", STROKE_VIOLATION],
-              ].map(([name, fill]) => (
+            {/* edges */}
+            <svg
+              width={layout.canvasW}
+              height={graph.height}
+              className="absolute inset-0"
+              style={{ pointerEvents: "none" }}
+              aria-hidden
+            >
+              <defs>
+                {[
+                  ["neutral", "rgba(228,228,231,0.34)"],
+                  ["taint", STROKE_TAINT],
+                  ["violation", STROKE_VIOLATION],
+                ].map(([name, fill]) => (
+                  <marker
+                    key={name}
+                    id={`${uid}-arrow-${name}`}
+                    viewBox="0 0 10 10"
+                    refX="9"
+                    refY="5"
+                    markerWidth="9"
+                    markerHeight="9"
+                    markerUnits="userSpaceOnUse"
+                    orient="auto"
+                  >
+                    <path d="M0.5,1 L9,5 L0.5,9 Z" fill={fill} />
+                  </marker>
+                ))}
                 <marker
-                  key={name}
-                  id={`${uid}-arrow-${name}`}
+                  id={`${uid}-stop`}
                   viewBox="0 0 10 10"
-                  refX="9"
+                  refX="5"
                   refY="5"
-                  markerWidth="9"
-                  markerHeight="9"
+                  markerWidth="11"
+                  markerHeight="11"
                   markerUnits="userSpaceOnUse"
                   orient="auto"
                 >
-                  <path d="M0.5,1 L9,5 L0.5,9 Z" fill={fill} />
+                  <path d="M4,0.5 L4,9.5" stroke={STROKE_VIOLATION} strokeWidth="2.2" strokeLinecap="round" />
                 </marker>
-              ))}
-              <marker
-                id={`${uid}-stop`}
-                viewBox="0 0 10 10"
-                refX="5"
-                refY="5"
-                markerWidth="11"
-                markerHeight="11"
-                markerUnits="userSpaceOnUse"
-                orient="auto"
-              >
-                <path d="M4,0.5 L4,9.5" stroke={STROKE_VIOLATION} strokeWidth="2.2" strokeLinecap="round" />
-              </marker>
-            </defs>
+              </defs>
 
-            {graph.edges.map((e) => {
-              const from = graph.nodes[e.from];
-              const to = graph.nodes[e.to];
-              const w = edgeWidth(e.bytes);
-              const red = graph.redEdges.has(e.key);
-              const taint = isUntrusted(from.node.origin);
-              const dormant = graph.dormantTaint.has(e.from) && !reveal;
-              const isSevered = severed && graph.terminalRedEdges.has(e.key);
-              const dim =
-                highlight !== null && !(highlight.has(e.from) && highlight.has(e.to)) ? 0.25 : 1;
+              {graph.edges.map((e) => {
+                const from = graph.nodes[e.from];
+                const to = graph.nodes[e.to];
+                const w = edgeWidth(e.bytes);
+                const red = graph.redEdges.has(e.key);
+                const taint = isUntrusted(from.node.origin);
+                const dormant = graph.dormantTaint.has(e.from) && !reveal;
+                const isSevered = severed && graph.terminalRedEdges.has(e.key);
+                const dim =
+                  highlight !== null && !(highlight.has(e.from) && highlight.has(e.to)) ? 0.25 : 1;
 
-              const tone: "neutral" | "taint" | "violation" = red ? "violation" : taint ? "taint" : "neutral";
-              const overlayOpacity = red ? 0.95 : dormant ? 0.08 : 0.7;
+                const tone: "neutral" | "taint" | "violation" = red ? "violation" : taint ? "taint" : "neutral";
+                const overlayOpacity = red ? 0.95 : dormant ? 0.08 : 0.7;
 
-              return (
-                <g key={e.key} opacity={dim}>
-                  <path
-                    d={e.d}
-                    fill="none"
-                    stroke={STROKE_STRUCTURAL}
-                    strokeWidth={w}
-                    strokeLinecap="round"
-                    markerEnd={tone === "neutral" ? `url(#${uid}-arrow-neutral)` : undefined}
-                  />
-                  {tone !== "neutral" && (
+                return (
+                  <g key={e.key} opacity={dim}>
                     <path
                       d={e.d}
                       fill="none"
-                      stroke={red ? STROKE_VIOLATION : STROKE_TAINT}
+                      stroke={STROKE_STRUCTURAL}
                       strokeWidth={w}
                       strokeLinecap="round"
-                      strokeDasharray={isSevered ? "5 5" : undefined}
-                      opacity={overlayOpacity}
-                      markerEnd={
-                        isSevered
-                          ? `url(#${uid}-stop)`
-                          : `url(#${uid}-arrow-${red ? "violation" : "taint"})`
-                      }
+                      markerEnd={tone === "neutral" ? `url(#${uid}-arrow-neutral)` : undefined}
                     />
-                  )}
-                  {red && live && !isSevered && (
+                    {tone !== "neutral" && (
+                      <path
+                        d={e.d}
+                        fill="none"
+                        stroke={red ? STROKE_VIOLATION : STROKE_TAINT}
+                        strokeWidth={w}
+                        strokeLinecap="round"
+                        strokeDasharray={isSevered ? "5 5" : undefined}
+                        opacity={overlayOpacity}
+                        markerEnd={
+                          isSevered
+                            ? `url(#${uid}-stop)`
+                            : `url(#${uid}-arrow-${red ? "violation" : "taint"})`
+                        }
+                      />
+                    )}
+                    {red && live && !isSevered && (
+                      <path
+                        d={e.d}
+                        fill="none"
+                        stroke="rgba(254,202,202,0.55)"
+                        strokeWidth={Math.max(1, w - 0.5)}
+                        strokeLinecap="round"
+                        strokeDasharray="4 24"
+                        className="causal-flowmap-march"
+                      />
+                    )}
+                    {/* generous invisible hit area */}
                     <path
                       d={e.d}
                       fill="none"
-                      stroke="rgba(254,202,202,0.55)"
-                      strokeWidth={Math.max(1, w - 0.5)}
-                      strokeLinecap="round"
-                      strokeDasharray="4 24"
-                      className="causal-flowmap-march"
-                    />
-                  )}
-                  {/* generous invisible hit area */}
-                  <path
-                    d={e.d}
-                    fill="none"
-                    stroke="transparent"
-                    strokeWidth={Math.max(w, 16)}
-                    style={{ pointerEvents: "stroke", cursor: "crosshair" }}
-                    onMouseEnter={() => setHover({ kind: "edge", key: e.key })}
-                    onMouseLeave={() => setHover(null)}
+                      stroke="transparent"
+                      strokeWidth={Math.max(w, 16)}
+                      style={{ pointerEvents: "stroke", cursor: "crosshair" }}
+                      onMouseEnter={() => setHover({ kind: "edge", key: e.key })}
+                      onMouseLeave={() => setHover(null)}
+                    >
+                      <title>
+                        {`${from.node.name} → ${to.node.name} · ${e.bytes !== undefined ? fmtBytes(e.bytes) : "bytes not recorded"}`}
+                      </title>
+                    </path>
+                  </g>
+                );
+              })}
+            </svg>
+
+            {/* edge labels */}
+            {graph.edges.map((e) => {
+              const from = graph.nodes[e.from];
+              const red = graph.redEdges.has(e.key);
+              const dormant = graph.dormantTaint.has(e.from) && !reveal;
+              const dim = highlight !== null && !(highlight.has(e.from) && highlight.has(e.to));
+              const deferred =
+                from.node.capability === "MEMORY_WRITE" && graph.nodes[e.to].node.capability !== "NONE";
+              const carriesPrivate = from.node.capability === "READ_PRIVATE";
+              if (e.bytes === undefined && !deferred) return null;
+              return (
+                <div
+                  key={`label-${e.key}`}
+                  className="absolute z-30 pointer-events-none"
+                  style={{
+                    left: e.mx,
+                    top: e.my,
+                    transform: "translate(-50%,-50%)",
+                    opacity: dim ? 0.25 : dormant ? 0.35 : 1,
+                  }}
+                >
+                  <span
+                    className={`inline-flex items-center gap-1 font-mono text-[9.5px] tabular-nums px-1.5 py-0.5 rounded border bg-[#0f0f11] ${
+                      red ? "border-red-500/30 text-red-300/90" : "border-white/[0.08] text-zinc-500"
+                    }`}
                   >
-                    <title>
-                      {`${from.node.name} → ${to.node.name} · ${e.bytes !== undefined ? fmtBytes(e.bytes) : "bytes not recorded"}`}
-                    </title>
-                  </path>
-                </g>
+                    {carriesPrivate && <Lock className="w-2.5 h-2.5" strokeWidth={2} />}
+                    {e.bytes !== undefined ? fmtBytes(e.bytes) : "—"}
+                    {deferred && <span className="text-zinc-400 tracking-[0.08em]">DEFERRED</span>}
+                    {graph.witnessedEdges.has(e.key) && (
+                      <span className="text-zinc-400 tracking-[0.08em]">{event.witness.kind.toUpperCase()}</span>
+                    )}
+                  </span>
+                </div>
               );
             })}
-          </svg>
 
-          {/* edge labels */}
-          {graph.edges.map((e) => {
-            const from = graph.nodes[e.from];
-            const red = graph.redEdges.has(e.key);
-            const dormant = graph.dormantTaint.has(e.from) && !reveal;
-            const dim = highlight !== null && !(highlight.has(e.from) && highlight.has(e.to));
-            const deferred =
-              from.node.capability === "MEMORY_WRITE" && graph.nodes[e.to].node.capability !== "NONE";
-            const carriesPrivate = from.node.capability === "READ_PRIVATE";
-            if (e.bytes === undefined && !deferred) return null;
-            return (
-              <div
-                key={`label-${e.key}`}
-                className="absolute z-30 pointer-events-none"
-                style={{
-                  left: e.mx,
-                  top: e.my,
-                  transform: "translate(-50%,-50%)",
-                  opacity: dim ? 0.25 : dormant ? 0.35 : 1,
-                }}
-              >
-                <span
-                  className={`inline-flex items-center gap-1 font-mono text-[9.5px] tabular-nums px-1.5 py-0.5 rounded border bg-[#0f0f11] ${
-                    red ? "border-red-500/30 text-red-300/90" : "border-white/[0.08] text-zinc-500"
-                  }`}
-                >
-                  {carriesPrivate && <Lock className="w-2.5 h-2.5" strokeWidth={2} />}
-                  {e.bytes !== undefined ? fmtBytes(e.bytes) : "—"}
-                  {deferred && <span className="text-zinc-600 tracking-[0.08em]">DEFERRED</span>}
-                  {graph.witnessedEdges.has(e.key) && (
-                    <span className="text-zinc-600 tracking-[0.08em]">{event.witness.kind.toUpperCase()}</span>
-                  )}
-                </span>
-              </div>
-            );
-          })}
-
-          {/* nodes */}
-          {graph.nodes.map((g) => {
-            const visual = nodeVisual(g, graph, reveal);
-            const dim = highlight !== null && !highlight.has(g.index) ? 0.25 : 1;
-            const isSelected = anchor === g.index;
-            const km = kindMeta(g.node.kind);
-            const violating = g.node.violating === true;
-            return (
-              <div key={g.node.spanId} className="absolute z-20" style={{ left: g.x, top: g.y, transform: "translate(-50%,-50%)" }}>
-                <button
-                  onClick={() => pick(g.index)}
-                  onMouseEnter={() => setHover({ kind: "node", index: g.index })}
-                  onMouseLeave={() => setHover(null)}
-                  onFocus={() => setHover({ kind: "node", index: g.index })}
-                  onBlur={() => setHover(null)}
-                  aria-pressed={isSelected}
-                  aria-label={`${g.node.name}, span ${g.node.spanId}, origin ${g.node.origin}, capability ${g.node.capability}${violating ? ", violating node" : ""}`}
-                  style={{ width: NODE_W, height: NODE_H, opacity: dim }}
-                  className={`relative block text-left rounded overflow-hidden transition-opacity ${visual.className} ${
-                    isSelected ? "ring-1 ring-indigo-400/70" : ""
-                  } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/80 hover:brightness-125`}
-                >
-                  {visual.hatch && (
-                    <span
-                      aria-hidden
-                      className="absolute inset-0 pointer-events-none"
-                      style={{ backgroundImage: visual.hatch, opacity: visual.hatchOpacity }}
-                    />
-                  )}
-                  <span className="relative flex flex-col gap-1 px-2 py-1.5">
-                    <span className="flex items-center gap-1.5 min-w-0">
-                      <km.Icon className={`w-3 h-3 flex-shrink-0 ${violating ? "text-red-300" : km.tone}`} strokeWidth={1.75} />
-                      <span className={`font-mono text-[12px] truncate ${violating ? "text-red-100" : "text-zinc-200"}`}>
-                        {g.node.name}
-                      </span>
-                      <span className="ml-auto font-mono text-[10px] text-zinc-600 flex-shrink-0">#{g.node.spanId}</span>
-                    </span>
-                    <span className="flex items-center gap-1 min-w-0">
-                      {violating && <X className="w-2.5 h-2.5 text-red-400 flex-shrink-0" strokeWidth={3} />}
+            {/* nodes */}
+            {graph.nodes.map((g) => {
+              const visual = nodeVisual(g, graph, reveal);
+              const dim = highlight !== null && !highlight.has(g.index) ? 0.25 : 1;
+              const isSelected = anchor === g.index;
+              const km = kindMeta(g.node.kind);
+              const violating = g.node.violating === true;
+              return (
+                <div key={g.node.spanId} className="absolute z-20" style={{ left: g.x, top: g.y, transform: "translate(-50%,-50%)" }}>
+                  <button
+                    onClick={() => pick(g.index)}
+                    onMouseEnter={() => setHover({ kind: "node", index: g.index })}
+                    onMouseLeave={() => setHover(null)}
+                    onFocus={() => setHover({ kind: "node", index: g.index })}
+                    onBlur={() => setHover(null)}
+                    aria-pressed={isSelected}
+                    aria-label={`${g.node.name}, span ${g.node.spanId}, origin ${g.node.origin}, capability ${g.node.capability}${violating ? ", violating node" : ""}`}
+                    style={{ width: layout.nodeW, height: NODE_H, opacity: dim }}
+                    className={`relative block text-left rounded overflow-hidden transition-opacity ${visual.className} ${
+                      isSelected ? "ring-1 ring-indigo-400/70" : ""
+                    } hover:brightness-125`}
+                  >
+                    {visual.hatch && (
                       <span
-                        className={`font-mono text-[9px] tracking-[0.1em] font-semibold truncate ${
-                          violating ? "text-red-300/90" : "text-zinc-400"
-                        }`}
-                      >
-                        {TRUST_META[g.node.origin].short}
-                      </span>
-                      {g.node.capability !== "NONE" && (
-                        <>
-                          <span className="text-zinc-700">·</span>
-                          <span
-                            className={`inline-flex items-center gap-1 font-mono text-[9px] tracking-[0.09em] font-semibold truncate ${
-                              violating ? "text-red-300/90" : "text-zinc-500"
-                            }`}
-                          >
-                            {(() => {
-                              const CapIcon = CAP_META[g.node.capability].Icon;
-                              return <CapIcon className="w-2.5 h-2.5 flex-shrink-0" strokeWidth={1.75} />;
-                            })()}
-                            {CAP_META[g.node.capability].label}
-                          </span>
-                        </>
-                      )}
-                      {graph.dormantTaint.has(g.index) && !reveal && (
-                        <span className="ml-auto font-mono text-[8.5px] tracking-[0.1em] text-zinc-600 flex-shrink-0">
-                          DORMANT
+                        aria-hidden
+                        className="absolute inset-0 pointer-events-none"
+                        style={{ backgroundImage: visual.hatch, opacity: visual.hatchOpacity }}
+                      />
+                    )}
+                    <span className="relative flex flex-col gap-1 px-2 py-1.5">
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <km.Icon className={`w-3 h-3 flex-shrink-0 ${violating ? "text-red-300" : km.tone}`} strokeWidth={1.75} />
+                        <span className={`font-mono text-[12px] truncate ${violating ? "text-red-100" : "text-zinc-200"}`}>
+                          {g.node.name}
                         </span>
-                      )}
+                        <span className="ml-auto font-mono text-[10px] text-zinc-400 flex-shrink-0">#{g.node.spanId}</span>
+                      </span>
+                      <span className="flex items-center gap-1 min-w-0">
+                        {violating && <X className="w-2.5 h-2.5 text-red-400 flex-shrink-0" strokeWidth={3} />}
+                        <span
+                          className={`font-mono text-[9px] tracking-[0.1em] font-semibold truncate ${
+                            violating ? "text-red-300/90" : "text-zinc-400"
+                          }`}
+                        >
+                          {TRUST_META[g.node.origin].short}
+                        </span>
+                        {g.node.capability !== "NONE" && (
+                          <>
+                            <span className="text-zinc-700">·</span>
+                            <span
+                              className={`inline-flex items-center gap-1 font-mono text-[9px] tracking-[0.09em] font-semibold truncate ${
+                                violating ? "text-red-300/90" : "text-zinc-500"
+                              }`}
+                            >
+                              {(() => {
+                                const CapIcon = CAP_META[g.node.capability].Icon;
+                                return <CapIcon className="w-2.5 h-2.5 flex-shrink-0" strokeWidth={1.75} />;
+                              })()}
+                              {CAP_META[g.node.capability].label}
+                            </span>
+                          </>
+                        )}
+                        {graph.dormantTaint.has(g.index) && !reveal && (
+                          <span className="ml-auto font-mono text-[8.5px] tracking-[0.1em] text-zinc-500 flex-shrink-0">
+                            DORMANT
+                          </span>
+                        )}
+                      </span>
                     </span>
-                  </span>
-                </button>
+                  </button>
 
-                {/* the verdict seal sits on the node the boundary crossed */}
-                {violating && (
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full pt-1 flex items-center gap-1 whitespace-nowrap">
-                    <OutcomeChip outcome={event.outcome} />
-                    {severed && <ShieldCheck className="w-3 h-3 text-emerald-400" strokeWidth={2} />}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                  {/* the verdict seal sits on the node the boundary crossed */}
+                  {violating && (
+                    <div className="absolute left-1/2 -translate-x-1/2 top-full pt-1 flex items-center gap-1 whitespace-nowrap">
+                      <OutcomeChip outcome={event.outcome} />
+                      {severed && <ShieldCheck className="w-3 h-3 text-emerald-400" strokeWidth={2} />}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
-          {/* hover card */}
-          {hoveredNode && <NodeCard g={hoveredNode} graph={graph} event={event} onOpenTrace={onOpenTrace} />}
-          {hoveredEdge && <EdgeCard e={hoveredEdge} graph={graph} event={event} />}
+            {/* hover card */}
+            {/* Keyed on the subject so each card measures its own height rather
+                than inheriting the previous hover's box. */}
+            {hoveredNode && (
+              <NodeCard
+                key={hoveredNode.node.spanId}
+                g={hoveredNode}
+                graph={graph}
+                event={event}
+                bounds={cardBounds}
+                onOpenTrace={onOpenTrace}
+              />
+            )}
+            {hoveredEdge && (
+              <EdgeCard key={hoveredEdge.key} e={hoveredEdge} graph={graph} event={event} bounds={cardBounds} />
+            )}
+          </div>
         </div>
+        {/* macOS overlay scrollbars are invisible until they move, so the canvas
+            says for itself when it continues past the viewport. */}
+        {overflowsLeft && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-[#0f0f11] to-transparent"
+          />
+        )}
+        {overflowsRight && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-[#0f0f11] to-transparent"
+          />
+        )}
       </div>
 
       {/* ── selection bar ───────────────────────────────────────── */}
       {anchorNode !== null && highlight !== null && (
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-t border-white/[0.06] bg-indigo-500/[0.04]">
           <MonoLabel className="text-indigo-300/70">Taint highlighter</MonoLabel>
+          {/* It cycles rather than toggles, so it says so — a bordered chip that
+              never changes on hover is how the badges beside it behave. */}
           <button
             onClick={cycleDirection}
-            title="Click to change direction"
-            className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.08em] px-2 py-1 rounded border border-indigo-400/30 bg-indigo-500/[0.08] text-indigo-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/70"
+            title={`Direction — ${DIRECTION_META[activeDirection].label.toLowerCase()}. Click to cycle.`}
+            className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.08em] px-2 py-1.5 rounded border border-indigo-400/30 bg-indigo-500/[0.08] text-indigo-200 transition-colors hover:bg-indigo-500/[0.16] hover:border-indigo-400/50"
           >
             {(() => {
               const DirIcon = DIRECTION_META[activeDirection].Icon;
               return <DirIcon className="w-3 h-3" strokeWidth={2} />;
             })()}
             {DIRECTION_META[activeDirection].label}
+            <RotateCw className="w-2.5 h-2.5 text-indigo-300/60" strokeWidth={2} />
           </button>
           <span className="font-mono text-[11px] text-zinc-400">
             from <span className="text-zinc-200">{anchorNode.node.name}</span>
-            <span className="text-zinc-600"> #{anchorNode.node.spanId}</span> —{" "}
+            <span className="text-zinc-500"> #{anchorNode.node.spanId}</span> —{" "}
             {DIRECTION_META[activeDirection].hint}
           </span>
           <span className="font-mono text-[11px] text-zinc-500 tabular-nums">
@@ -894,9 +1027,10 @@ export function FlowMap({ event, onOpenTrace, className = "" }: FlowMapProps) {
           </span>
           <button
             onClick={clear}
-            className="ml-auto font-mono text-[10px] tracking-[0.08em] text-zinc-500 hover:text-zinc-300 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/70 rounded px-1"
+            title="Clear the taint highlighter (Escape)"
+            className="ml-auto inline-flex items-center font-mono text-[10px] tracking-[0.08em] px-2 py-1.5 rounded border border-white/10 bg-white/[0.03] text-zinc-400 hover:text-zinc-200 hover:border-white/20 transition-colors"
           >
-            CLEAR
+            Clear
           </button>
         </div>
       )}
@@ -954,14 +1088,17 @@ export function FlowMap({ event, onOpenTrace, className = "" }: FlowMapProps) {
         )}
         {graph.dormantTaint.size > 0 && (
           <div className="flex items-center gap-1.5">
+            {/* A legend key has to SHOW the distinction, so the hatch is drawn at
+                a legible strength here rather than reproducing the 8% suppression
+                it is explaining — at 8% in a 16px box the swatch is a blank. */}
             <span className="relative inline-block w-4 h-4 rounded-sm overflow-hidden bg-zinc-900 border border-white/[0.07]">
               <span
                 aria-hidden
                 className="absolute inset-0"
-                style={{ backgroundImage: TRUST_META.UNTRUSTED_EXTERNAL.hatch, opacity: 0.08 }}
+                style={{ backgroundImage: TRUST_META.UNTRUSTED_EXTERNAL.hatch, opacity: 0.35 }}
               />
             </span>
-            <span className="font-mono text-[9.5px] tracking-[0.08em] text-zinc-600">DORMANT — reaches no sink</span>
+            <span className="font-mono text-[9.5px] tracking-[0.08em] text-zinc-400">DORMANT — reaches no sink</span>
           </div>
         )}
         <div className="flex items-center gap-1.5">
@@ -976,7 +1113,7 @@ export function FlowMap({ event, onOpenTrace, className = "" }: FlowMapProps) {
               />
             ))}
           </svg>
-          <span className="font-mono text-[9.5px] text-zinc-600">
+          <span className="font-mono text-[9.5px] text-zinc-400">
             {fmtBytes(64)} · {fmtBytes(1024)} · {fmtBytes(65_536)} — w = 1 + log₂(bytes ÷ 64), max 6
           </span>
         </div>
@@ -986,7 +1123,7 @@ export function FlowMap({ event, onOpenTrace, className = "" }: FlowMapProps) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 p-3 border-t border-white/[0.06]">
         <div className="space-y-1.5">
           <RedactedWitness witness={event.witness} />
-          <p className="font-mono text-[10px] text-zinc-600 leading-relaxed">
+          <p className="font-mono text-[10px] text-zinc-400 leading-relaxed">
             {graph.witnessedEdges.size > 0
               ? `Covers ${graph.witnessedEdges.size} of ${graph.edges.length} edges on this graph. Every other hop carries no witness and claims none.`
               : "No hop on this graph is covered by a verbatim witness; the finding rests on structure, not on a matched string."}
@@ -1021,30 +1158,66 @@ function Figure({ label, value, hint }: { label: string; value: string; hint: st
 
 // ── Hover cards ───────────────────────────────────────────────────────
 
+/** The horizontal band a card may occupy, in canvas coordinates. */
+interface CardBounds {
+  min: number;
+  max: number;
+}
+
 /**
  * Anchors a hover card beside its subject, flipping to the other side when it
- * would leave the canvas and clamping vertically so it is never clipped by the
- * scroll container.
+ * would leave the VISIBLE part of the canvas — not the canvas, which can be
+ * wider than the viewport showing it — and clamping in both axes so it is never
+ * clipped. Bounding against the canvas instead cut a card off the right edge of
+ * a narrow viewport, and a hover card cannot be scrolled into view: the scroll
+ * that would reveal it is the gesture that dismisses it.
  */
-function cardPosition(x: number, halfWidth: number, y: number, height: number, canvasHeight: number) {
-  const flip = x + halfWidth + 14 + TIP_W > CANVAS_W;
-  const left = flip ? Math.max(8, x - halfWidth - 14 - TIP_W) : x + halfWidth + 14;
+function cardPosition(
+  x: number,
+  halfWidth: number,
+  y: number,
+  height: number,
+  canvasHeight: number,
+  bounds: CardBounds,
+) {
+  const rightSide = x + halfWidth + 14;
+  const leftSide = x - halfWidth - 14 - TIP_W;
+  const ceiling = Math.max(bounds.min, bounds.max - TIP_W);
+  const left = Math.min(Math.max(rightSide + TIP_W <= bounds.max ? rightSide : leftSide, bounds.min), ceiling);
   const top = Math.min(Math.max(8, y - 24), Math.max(8, canvasHeight - height - 8));
   return { left, top, maxHeight: canvasHeight - 16 };
+}
+
+/**
+ * The vertical clamp needs the card's height, and a card's height depends on how
+ * much evidence the node carries — a guessed constant clipped the last line of
+ * the witness gloss off the bottom. Measure the rendered box and re-clamp with
+ * it. `overflow: hidden` caps the measurement at maxHeight, so this converges in
+ * one extra frame instead of oscillating.
+ */
+function useCardHeight(estimate: number): [(el: HTMLDivElement | null) => void, number] {
+  const [height, setHeight] = useState(estimate);
+  const measure = useCallback((el: HTMLDivElement | null) => {
+    if (el !== null && el.offsetHeight > 0) setHeight(el.offsetHeight);
+  }, []);
+  return [measure, height];
 }
 
 function NodeCard({
   g,
   graph,
   event,
+  bounds,
   onOpenTrace,
 }: {
   g: GNode;
   graph: FlowGraph;
   event: SecurityEvent;
+  bounds: CardBounds;
   onOpenTrace?: (id: string) => void;
 }) {
-  const { left, top, maxHeight } = cardPosition(g.x, NODE_W / 2, g.y, 224, graph.height);
+  const [measure, height] = useCardHeight(224);
+  const { left, top, maxHeight } = cardPosition(g.x, graph.layout.nodeW / 2, g.y, height, graph.height, bounds);
   const km = kindMeta(g.node.kind);
   const downstream = reach(g.index, graph.fwd).size - 1;
   const upstream = reach(g.index, graph.bwd).size - 1;
@@ -1052,6 +1225,7 @@ function NodeCard({
 
   return (
     <div
+      ref={measure}
       className="absolute z-40 rounded-md border border-white/[0.1] bg-[#131316] shadow-xl shadow-black/60 pointer-events-none"
       style={{ left, top, width: TIP_W, maxHeight, overflow: "hidden" }}
     >
@@ -1059,7 +1233,7 @@ function NodeCard({
         <km.Icon className={`w-3 h-3 ${km.tone}`} strokeWidth={1.75} />
         <span className="font-mono text-[9px] tracking-[0.1em] text-zinc-500">{km.label}</span>
         <span className="font-mono text-[11px] text-zinc-200 truncate">{g.node.name}</span>
-        <span className="ml-auto font-mono text-[10px] text-zinc-600">#{g.node.spanId}</span>
+        <span className="ml-auto font-mono text-[10px] text-zinc-400">#{g.node.spanId}</span>
       </div>
       <div className="px-2.5 py-2 space-y-1.5">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -1067,13 +1241,13 @@ function NodeCard({
           <CapabilityChip capability={g.node.capability} violating={g.node.violating === true} />
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="font-mono text-[10px] text-zinc-600 tabular-nums">
+          <span className="font-mono text-[10px] text-zinc-400 tabular-nums">
             bytes in {g.node.bytes !== undefined ? fmtBytes(g.node.bytes) : "—"}
           </span>
-          <span className="font-mono text-[10px] text-zinc-600 tabular-nums">
+          <span className="font-mono text-[10px] text-zinc-400 tabular-nums">
             influenced {downstream} · influenced by {upstream}
           </span>
-          <span className="font-mono text-[10px] text-zinc-600">{LANE_TITLE[g.lane].toLowerCase()}</span>
+          <span className="font-mono text-[10px] text-zinc-400">{LANE_TITLE[g.lane].toLowerCase()}</span>
         </div>
         {isUntrusted(g.node.origin) && (
           <p className="font-mono text-[10px] leading-relaxed text-zinc-500">
@@ -1090,7 +1264,7 @@ function NodeCard({
           </div>
         )}
         {onOpenTrace && explorerIncidentFor(event.traceId) && (
-          <p className="font-mono text-[9.5px] text-zinc-700 pt-0.5">
+          <p className="font-mono text-[9.5px] text-zinc-500 pt-0.5">
             span lives in trace {event.traceId.slice(0, 8)}
           </p>
         )}
@@ -1099,15 +1273,27 @@ function NodeCard({
   );
 }
 
-function EdgeCard({ e, graph, event }: { e: GEdge; graph: FlowGraph; event: SecurityEvent }) {
+function EdgeCard({
+  e,
+  graph,
+  event,
+  bounds,
+}: {
+  e: GEdge;
+  graph: FlowGraph;
+  event: SecurityEvent;
+  bounds: CardBounds;
+}) {
   const from = graph.nodes[e.from];
   const to = graph.nodes[e.to];
   const witnessed = graph.witnessedEdges.has(e.key);
   const red = graph.redEdges.has(e.key);
-  const { left, top, maxHeight } = cardPosition(e.mx, 14, e.my, 168, graph.height);
+  const [measure, height] = useCardHeight(168);
+  const { left, top, maxHeight } = cardPosition(e.mx, 14, e.my, height, graph.height, bounds);
 
   return (
     <div
+      ref={measure}
       className="absolute z-40 rounded-md border border-white/[0.1] bg-[#131316] shadow-xl shadow-black/60 pointer-events-none"
       style={{ left, top, width: TIP_W, maxHeight, overflow: "hidden" }}
     >
@@ -1119,11 +1305,11 @@ function EdgeCard({ e, graph, event }: { e: GEdge; graph: FlowGraph; event: Secu
       </div>
       <div className="px-2.5 py-2 space-y-1.5">
         <p className="font-mono text-[11px] text-zinc-300">
-          {from.node.name} <span className="text-zinc-600">#{from.node.spanId}</span>
-          <span className="text-zinc-600"> → </span>
-          {to.node.name} <span className="text-zinc-600">#{to.node.spanId}</span>
+          {from.node.name} <span className="text-zinc-400">#{from.node.spanId}</span>
+          <span className="text-zinc-400"> → </span>
+          {to.node.name} <span className="text-zinc-400">#{to.node.spanId}</span>
         </p>
-        <p className="font-mono text-[10px] text-zinc-600">
+        <p className="font-mono text-[10px] text-zinc-400">
           stroke {edgeWidth(e.bytes).toFixed(2)}px = 1 + log₂({e.bytes !== undefined ? e.bytes.toLocaleString() : "—"} ÷ 64)
         </p>
         {witnessed ? (
@@ -1133,7 +1319,7 @@ function EdgeCard({ e, graph, event }: { e: GEdge; graph: FlowGraph; event: Secu
             {event.witness.sinkOffset !== undefined && ` · sink offset ${event.witness.sinkOffset.toLocaleString()}`}
           </p>
         ) : (
-          <p className="font-mono text-[10px] text-zinc-600">witness — this hop is not the witnessed pair</p>
+          <p className="font-mono text-[10px] text-zinc-400">witness — this hop is not the witnessed pair</p>
         )}
         {from.node.capability === "MEMORY_WRITE" && to.node.capability !== "NONE" && (
           <p className="font-mono text-[10px] leading-relaxed text-amber-200/70">
@@ -1170,7 +1356,7 @@ export function FlowMapPicker({
     <div className={`${PANEL} rounded-lg overflow-hidden ${className}`}>
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06] bg-white/[0.02]">
         <MonoLabel className="text-zinc-400">Flows</MonoLabel>
-        <span className="font-mono text-[10px] text-zinc-600 tabular-nums">{ordered.length}</span>
+        <span className="font-mono text-[10px] text-zinc-400 tabular-nums">{ordered.length}</span>
       </div>
       <div className="max-h-[420px] overflow-y-auto divide-y divide-white/[0.04]">
         {ordered.map((e) => {
@@ -1180,7 +1366,7 @@ export function FlowMapPicker({
             <button
               key={e.id}
               onClick={() => onSelect(e.id)}
-              className={`w-full text-left px-3 py-2 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/70 ${
+              className={`w-full text-left px-3 py-2 transition-colors ${
                 active ? "bg-indigo-500/[0.07]" : "hover:bg-white/[0.02]"
               }`}
             >
@@ -1188,7 +1374,7 @@ export function FlowMapPicker({
                 <span className="font-mono text-[12.5px] text-zinc-200 tabular-nums w-7 text-right">{e.priority}</span>
                 <ClassChip eventClass={e.eventClass} />
                 <span className="font-mono text-[10.5px] text-zinc-500">{e.id}</span>
-                <span className="ml-auto font-mono text-[9.5px] text-zinc-600 tabular-nums whitespace-nowrap">
+                <span className="ml-auto font-mono text-[9.5px] text-zinc-400 tabular-nums whitespace-nowrap">
                   {e.flow.length} hops · {sinks} sink{sinks === 1 ? "" : "s"}
                 </span>
               </div>
@@ -1196,8 +1382,8 @@ export function FlowMapPicker({
                 {defangProse(e.title)}
               </p>
               <div className="flex items-center gap-2 pt-0.5">
-                <span className="font-mono text-[10px] text-zinc-600">{e.agent}</span>
-                <span className="font-mono text-[10px] text-zinc-700">{e.ruleId}</span>
+                <span className="font-mono text-[10px] text-zinc-400">{e.agent}</span>
+                <span className="font-mono text-[10px] text-zinc-500">{e.ruleId}</span>
               </div>
             </button>
           );

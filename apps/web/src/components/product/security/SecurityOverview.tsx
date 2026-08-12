@@ -29,7 +29,7 @@
  *     product's personality rather than a caveat.
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AS_OF,
   CAPABILITY_GRANTS,
@@ -57,6 +57,8 @@ import { ConfidenceMeter, CopyButton, MonoLabel } from "../ui";
 import { CAP_META } from "./trust-ui";
 import {
   ArrowRight,
+  ArrowUpRight,
+  Check,
   GitCommit,
   Layers,
   Lock,
@@ -180,7 +182,12 @@ function ModeChip({ mode, canaryPct }: { mode: PerimeterCell["mode"]; canaryPct?
   );
 }
 
-/** A clickable event id. Nothing on this screen references an event without opening it. */
+/**
+ * A clickable event id. Nothing on this screen references an event without
+ * opening it — and it is drawn in indigo, the product's navigation colour
+ * (`SecurityEvents.tsx:814`, `EvalsView.tsx:327`), so a link is never mistaken
+ * for one of the static mono chips sitting beside it. Sized to a ~28px target.
+ */
 function EventLink({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
   return (
     <button
@@ -188,11 +195,95 @@ function EventLink({ id, onOpen }: { id: string; onOpen: (id: string) => void })
         e.stopPropagation();
         onOpen(id);
       }}
-      className="font-mono text-[10.5px] text-zinc-400 hover:text-zinc-100 border border-white/10 hover:border-white/25 rounded px-1.5 py-0.5 transition-colors"
+      title={`Open ${id}`}
+      className="inline-flex items-center align-middle min-h-[28px] font-mono text-[10.5px] text-indigo-300 hover:text-indigo-200 border border-indigo-400/25 rounded px-1.5 py-1 hover:bg-indigo-500/[0.08] transition-colors"
     >
       {id}
     </button>
   );
+}
+
+/**
+ * The one action button on this tab. Same tone, radius, size and glyph as the
+ * action on an Events incident (`SecurityEvents.tsx:948`) — three tabs built in
+ * parallel had drifted into three vocabularies for the same "Open PR".
+ *
+ * `quiet` is the dismissal variant: same box, neutral tone, because dismissing a
+ * selection is not the same promise as landing a cut.
+ */
+function ActionButton({
+  children,
+  Icon = ArrowUpRight,
+  onClick,
+  tone = "action",
+  pressed,
+  title,
+}: {
+  children: React.ReactNode;
+  Icon?: typeof ArrowRight | null;
+  onClick: () => void;
+  tone?: "action" | "quiet";
+  pressed?: boolean;
+  title?: string;
+}) {
+  const toneClass = pressed
+    ? "text-indigo-200 border-indigo-400/45 bg-indigo-500/[0.14] hover:bg-indigo-500/[0.18]"
+    : tone === "action"
+      ? "text-indigo-300 border-indigo-400/25 hover:bg-indigo-500/[0.08]"
+      : "text-zinc-400 hover:text-zinc-200 border-white/10 hover:border-white/25 hover:bg-white/[0.04]";
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-pressed={pressed}
+      className={`flex-shrink-0 inline-flex items-center gap-1.5 font-mono text-[11px] border rounded-md px-2 py-1 min-h-[28px] transition-colors ${toneClass}`}
+    >
+      {children}
+      {Icon && <Icon className="w-3 h-3 flex-shrink-0" strokeWidth={2} />}
+    </button>
+  );
+}
+
+/**
+ * A horizontal scroller that says so. macOS draws no scrollbar until you touch
+ * the trackpad, so a clipped path is otherwise indistinguishable from a short
+ * one; the edge the content continues past is faded, and only that edge.
+ */
+function useEdgeFade<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+
+  const update = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    const left = el.scrollLeft > 1;
+    const right = max > 1 && el.scrollLeft < max - 1;
+    setEdges((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+  }, []);
+
+  useEffect(() => {
+    update();
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [update]);
+
+  const mask =
+    edges.left || edges.right
+      ? `linear-gradient(to right, ${edges.left ? "transparent 0, black 32px" : "black 0"}, ${
+          edges.right ? "black calc(100% - 32px), transparent 100%" : "black 100%"
+        })`
+      : undefined;
+
+  return {
+    ref,
+    onScroll: update,
+    style: mask ? ({ maskImage: mask, WebkitMaskImage: mask } as React.CSSProperties) : undefined,
+    clipped: edges.left || edges.right,
+  };
 }
 
 // ── the perimeter partition ───────────────────────────────────────────
@@ -251,13 +342,16 @@ function KpiStrip({ onOpenEvent }: { onOpenEvent: (id: string) => void }) {
         {/* Not MonoLabel: it uppercases, and a commit sha rendered A91F34D is a
             different string from the one an analyst pastes into a terminal. */}
         <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1.5 font-mono text-[10px] tracking-[0.12em] text-zinc-500">
-          <span className="whitespace-nowrap">
+          {/* Not nowrap: from md up the tile is a quarter of the row and this
+              string is wider than it, so pinning it to one line walked it over
+              the tile's right border and into its neighbour. */}
+          <span>
             MEASURED AT {fmtDate(POSTURE.measuredAt)} {fmtTime(POSTURE.measuredAt)}
           </span>
           <span className="inline-flex items-center gap-1 whitespace-nowrap">
             <GitCommit className="w-2.5 h-2.5" strokeWidth={1.75} />
             {POSTURE.commit}
-            <CopyButton value={POSTURE.commit} />
+            <CopyButton value={POSTURE.commit} className="p-2 -m-1.5 rounded" />
           </span>
         </span>
 
@@ -289,13 +383,15 @@ function KpiStrip({ onOpenEvent }: { onOpenEvent: (id: string) => void }) {
                 completes. Nothing is asserted at HEAD until then.
               </p>
             ) : (
-              <button
-                onClick={() => setRerunQueued(true)}
-                className="mt-2 inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.08em] text-zinc-300 hover:text-zinc-100 border border-white/10 hover:border-white/25 rounded px-2 py-1 transition-colors"
-              >
-                <RefreshCw className="w-2.5 h-2.5" strokeWidth={2} />
-                RE-RUN AT {POSTURE.headCommit}
-              </button>
+              <div className="mt-2">
+                <ActionButton
+                  onClick={() => setRerunQueued(true)}
+                  Icon={RefreshCw}
+                  title={`Queue a scan at ${POSTURE.headCommit}`}
+                >
+                  Re-run at {POSTURE.headCommit}
+                </ActionButton>
+              </div>
             )}
           </div>
         )}
@@ -374,53 +470,84 @@ function PerimeterStrip({
   // disagree, show the count and say why the list is missing.
   const consistent = cell !== null && rules.length === ruleIds.length && rules.length === cell.detections;
 
+  // How many slots the last row is short of at each column count the strip wraps
+  // to. Derived from the fixture's length, not from the five it happens to be.
+  const fillTo2 = (2 - (PERIMETER.length % 2)) % 2;
+  const fillTo3 = (3 - (PERIMETER.length % 3)) % 3;
+
   return (
     <div className="rounded-lg bg-[#0f0f11] border border-white/[0.06] overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06]">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06] flex-wrap">
         <MonoLabel>Perimeter</MonoLabel>
         <span className="text-[11px] text-zinc-600">
           {enforcing} enforcing · {canary} canary · {observeOnly} observe only — nothing on an
           observe-only path is denied
         </span>
         {selected && (
-          <button
-            onClick={() => onSelect(null)}
-            className="ml-auto font-mono text-[10px] tracking-[0.08em] text-zinc-500 hover:text-zinc-200 transition-colors"
-          >
-            CLEAR FILTER
-          </button>
+          <span className="ml-auto">
+            {/* Named for what it does: the selection expands this boundary's
+                rules, it does not filter anything else on the tab. */}
+            <ActionButton
+              onClick={() => onSelect(null)}
+              tone="quiet"
+              Icon={null}
+              title="Close the rule list and show all five boundaries"
+            >
+              SHOW ALL
+            </ActionButton>
+          </span>
         )}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
-        {PERIMETER.map((c, i) => {
+      {/* Dividers come from the gap, not from a per-cell left border: the grid
+          rewraps at sm and lg, and an index-chosen border left a stray rule
+          hanging at the panel edge and no rule at all between wrapped rows. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-px bg-white/[0.06]">
+        {PERIMETER.map((c) => {
           const isSelected = selected === c.key;
           const dimmed = selected !== null && !isSelected;
           return (
-            <button
-              key={c.key}
-              onClick={() => onSelect(isSelected ? null : c.key)}
-              className={`text-left px-3 py-3 border-white/[0.06] transition-colors ${
-                i > 0 ? "border-l" : ""
-              } ${isSelected ? "bg-white/[0.05]" : "hover:bg-white/[0.02]"} ${dimmed ? "opacity-45" : ""}`}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-                <MonoLabel className={isSelected ? "text-zinc-300" : ""}>{c.key}</MonoLabel>
-                <ModeChip mode={c.mode} canaryPct={c.canaryPct} />
-              </div>
-              <p className="text-[20px] font-light tabular-nums text-zinc-100 mt-2 leading-none">
-                {c.detections}
-              </p>
-              <p className="text-[10.5px] text-zinc-600 mt-1">
-                detection{c.detections === 1 ? "" : "s"}
-              </p>
-              {/* The wiring, drawn. A solid rule denies on this path; a broken
-                  one only watches. Five cells, and you can see at a glance which
-                  boundaries are real and which are decoration. */}
-              <div className="mt-2 h-[2px] w-full" style={WIRE_STYLE[c.mode]} />
-            </button>
+            <div key={c.key} className="bg-[#0f0f11]">
+              <button
+                onClick={() => onSelect(isSelected ? null : c.key)}
+                aria-pressed={isSelected}
+                className={`w-full h-full text-left px-3 py-3 transition-all ${
+                  isSelected
+                    ? "bg-white/[0.05] hover:bg-white/[0.09]"
+                    : dimmed
+                      ? "opacity-45 hover:opacity-100 hover:bg-white/[0.06]"
+                      : "hover:bg-white/[0.04]"
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                  <MonoLabel className={isSelected ? "text-zinc-300" : ""}>{c.key}</MonoLabel>
+                  <ModeChip mode={c.mode} canaryPct={c.canaryPct} />
+                </div>
+                <p className="text-[20px] font-light tabular-nums text-zinc-100 mt-2 leading-none">
+                  {c.detections}
+                </p>
+                <p className="text-[10.5px] text-zinc-600 mt-1">
+                  detection{c.detections === 1 ? "" : "s"}
+                </p>
+                {/* The wiring, drawn. A solid rule denies on this path; a broken
+                    one only watches. Five cells, and you can see at a glance which
+                    boundaries are real and which are decoration. */}
+                <div className="mt-2 h-[2px] w-full" style={WIRE_STYLE[c.mode]} />
+              </button>
+            </div>
           );
         })}
+        {/* The grid paints the dividers, so an incomplete last row would leave a
+            lit rectangle where a cell is not. These fill it with the panel. */}
+        {Array.from({ length: Math.max(fillTo2, fillTo3) }, (_, i) => (
+          <div
+            key={`fill-${i}`}
+            aria-hidden
+            className={`bg-[#0f0f11] ${i < fillTo2 ? "block" : "hidden"} ${
+              i < fillTo3 ? "sm:block" : "sm:hidden"
+            } lg:hidden`}
+          />
+        ))}
       </div>
 
       {cell && (
@@ -445,8 +572,14 @@ function PerimeterStrip({
               >
                 <span className="font-mono text-[11px] text-zinc-300">{d.id}</span>
                 <div className="min-w-0">
-                  <p className="text-[12.5px] text-zinc-300 truncate">{d.name}</p>
-                  <p className="text-[10.5px] text-zinc-600 truncate">{d.catches}</p>
+                  {/* Truncated text always carries its full value — the rule
+                      names and what they catch are the point of the list. */}
+                  <p className="text-[12.5px] text-zinc-300 truncate" title={d.name}>
+                    {d.name}
+                  </p>
+                  <p className="text-[10.5px] text-zinc-600 truncate" title={d.catches}>
+                    {d.catches}
+                  </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="font-mono text-[10.5px] text-zinc-500 tabular-nums hidden sm:block">
@@ -657,9 +790,13 @@ function Heatmap({ onOpenEvent }: { onOpenEvent: (id: string) => void }) {
     };
   }, []);
 
-  /** Log-scaled so 88 is still legible next to 1,902. Neutral fill only — magnitude is not a status. */
-  const alpha = (flows: number) =>
-    flows === 0 ? 0 : 0.04 + 0.28 * (Math.log1p(flows) / Math.log1p(max));
+  /**
+   * Log-scaled so 88 is still legible next to 1,902. Neutral fill only —
+   * magnitude is not a status. A present-but-zero cell is floored at the
+   * legend's lowest step rather than painted to nothing: it is a live cell of
+   * the grid, and only an ABSENT pair gets the bare "—" treatment.
+   */
+  const alpha = (flows: number) => 0.04 + 0.28 * (Math.log1p(flows) / Math.log1p(max));
 
   const selectedCell = selected ? byKey.get(`${selected.source}|${selected.sink}`) ?? null : null;
   const selectedEvent = selectedCell ? heatCellEvidence(selectedCell) : null;
@@ -758,20 +895,26 @@ function Heatmap({ onOpenEvent }: { onOpenEvent: (id: string) => void }) {
                         cell.violatesPolicy ? " · policy asserts zero" : ""
                       }`}
                       style={{ backgroundColor: `rgba(228,228,231,${a.toFixed(3)})` }}
+                      aria-pressed={isSelected}
                       className={`h-9 rounded-sm flex items-center justify-center transition-all ${
                         cell.violatesPolicy
                           ? "ring-1 ring-red-500/55 hover:ring-red-400/80"
                           : "border border-white/[0.05] hover:border-white/20"
-                      } ${isSelected ? "outline outline-1 outline-offset-1 outline-white/40" : ""} ${
-                        dim ? "opacity-25" : ""
-                      }`}
+                      } ${
+                        // Two pixels of solid white, held off the box — a violating
+                        // cell already carries a red ring, and a 1px 40% outline
+                        // sitting against it read as anti-aliasing.
+                        isSelected ? "outline outline-2 outline-offset-1 outline-white/70" : ""
+                      } ${dim ? "opacity-45" : ""}`}
                     >
                       <span
                         className={`font-mono text-[11px] tabular-nums ${
+                          isSelected ? "font-semibold " : ""
+                        }${
                           cell.violatesPolicy
                             ? "text-red-300"
                             : cell.flows === 0
-                              ? "text-zinc-700"
+                              ? "text-zinc-600"
                               : a > 0.18
                                 ? "text-zinc-100"
                                 : "text-zinc-400"
@@ -796,15 +939,23 @@ function Heatmap({ onOpenEvent }: { onOpenEvent: (id: string) => void }) {
 
           <div className="grid grid-cols-[128px_repeat(6,minmax(0,1fr))_58px] gap-1 pt-1 border-t border-white/[0.06]">
             <MonoLabel className="flex items-center">Σ</MonoLabel>
+            {/* The column totals recede with their columns. Left bright, they
+                were the loudest numbers on a grid the selection is not about. */}
             {sinks.map((k) => (
               <span
                 key={k}
-                className="text-center font-mono text-[10.5px] text-zinc-600 tabular-nums pt-1"
+                className={`text-center font-mono text-[10.5px] text-zinc-600 tabular-nums pt-1 transition-opacity ${
+                  selected !== null && selected.sink !== k ? "opacity-40" : ""
+                }`}
               >
                 {fmtCompact(colTotal(k))}
               </span>
             ))}
-            <span className="text-right font-mono text-[10.5px] text-zinc-600 tabular-nums pt-1">
+            <span
+              className={`text-right font-mono text-[10.5px] text-zinc-600 tabular-nums pt-1 transition-opacity ${
+                selected !== null ? "opacity-40" : ""
+              }`}
+            >
               {fmtCompact(total)}
             </span>
           </div>
@@ -873,6 +1024,8 @@ function TrifectaRow({
     { label: "EGRESS", value: trifecta.egressSink, Icon: ArrowRight },
   ];
 
+  const path = useEdgeFade<HTMLDivElement>();
+
   return (
     <div className="px-3 py-3 border-b border-white/[0.06] last:border-b-0">
       <div className="flex items-center gap-2 flex-wrap mb-2">
@@ -899,7 +1052,13 @@ function TrifectaRow({
 
       {/* The triple, as a path rather than three fields. Untrusted carries the
           hatch; nothing here is red unless it was actually exercised. */}
-      <div className="overflow-x-auto">
+      <div
+        ref={path.ref}
+        onScroll={path.onScroll}
+        style={path.style}
+        className="overflow-x-auto"
+        aria-label={`${trifecta.id} path: ${legs.map((l) => `${l.label} ${l.value}`).join(" then ")}`}
+      >
         <div className="inline-flex items-stretch gap-1.5 min-w-max whitespace-nowrap">
           {legs.map((leg, i) => (
             <div key={leg.label} className="inline-flex items-stretch gap-1.5">
@@ -909,6 +1068,7 @@ function TrifectaRow({
                 </span>
               )}
               <div
+                title={`${leg.label} — ${leg.value}`}
                 style={
                   i === 0
                     ? {
@@ -1040,9 +1200,34 @@ const ACTION_LABEL: Record<RankedRemediation["action"], string> = {
   arm_rule: "Arm rule",
 };
 
+/**
+ * What each label actually promises, and what this build actually does. The
+ * labels name five different real actions and the demo performs none of them —
+ * saying so on the control is the only version of this screen that keeps its
+ * word. Same sentences as the Events tab (`SecurityEvents.tsx:221`).
+ */
+const ACTION_NOTE: Record<RankedRemediation["action"], string> = {
+  open_pr:
+    "Opens a pull request against the customer's repository, verified by the repo's own suite before it is marked verified. Not wired in this demo — the cut is real, the button is not.",
+  open_registry: "Opens the source registry at the unregistered rows. Not wired in this demo.",
+  copy_snippet: "Copies the exact instrumentation snippet for this service. Not wired in this demo.",
+  rotate_credential: "Hands off to the credential owner's rotation flow. Not wired in this demo.",
+  arm_rule:
+    "Moves the rule one stage along monitor → canary → enforce, gated on its readiness bar. Not wired in this demo.",
+};
+
 function Recommendations({ onOpenEvent }: { onOpenEvent: (id: string) => void }) {
   const ranked = useMemo(() => topRemediations(4), []);
-  const [acked, setAcked] = useState<string | null>(null);
+  // A set, not a single id: queueing the second cut used to silently un-queue
+  // the first, which is the one thing a queue must never do.
+  const [queued, setQueued] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const toggleQueued = (title: string) =>
+    setQueued((prev) => {
+      const next = new Set(prev);
+      if (next.has(title)) next.delete(title);
+      else next.add(title);
+      return next;
+    });
 
   const totalDelta = ranked.reduce((a, r) => a + r.deltaScore, 0);
   const totalLines = ranked.reduce((a, r) => a + r.diffLines, 0);
@@ -1066,7 +1251,9 @@ function Recommendations({ onOpenEvent }: { onOpenEvent: (id: string) => void })
         </p>
       )}
 
-      {ranked.map((r) => (
+      {ranked.map((r) => {
+        const isQueued = queued.has(r.title);
+        return (
         <div key={r.title} className="px-3 py-3 border-b border-white/[0.06] last:border-b-0">
           <div className="flex items-start gap-3">
             <span className="font-mono text-[15px] text-zinc-100 tabular-nums w-9 flex-shrink-0 leading-tight">
@@ -1086,23 +1273,30 @@ function Recommendations({ onOpenEvent }: { onOpenEvent: (id: string) => void })
                   <EventLink key={id} id={id} onOpen={onOpenEvent} />
                 ))}
               </div>
-              {acked === r.title && (
-                <p className="font-mono text-[10.5px] text-zinc-500 mt-2 leading-relaxed">
-                  QUEUED — the diff, the verification run and the score delta are prepared on the
-                  event that asked for it.
-                </p>
+              {isQueued && (
+                <div className="mt-2 space-y-1">
+                  <p className="font-mono text-[10.5px] text-zinc-500 leading-relaxed">
+                    QUEUED — the diff, the verification run and the score delta are prepared on the
+                    event that asked for it.
+                  </p>
+                  <p className="text-[11px] text-zinc-600 leading-relaxed border-l border-white/10 pl-2">
+                    {ACTION_NOTE[r.action]}
+                  </p>
+                </div>
               )}
             </div>
-            <button
-              onClick={() => setAcked(acked === r.title ? null : r.title)}
-              className="flex-shrink-0 inline-flex items-center gap-1.5 font-mono text-[10.5px] tracking-[0.06em] text-zinc-300 hover:text-zinc-100 border border-white/10 hover:border-white/25 rounded px-2 py-1 transition-colors"
+            <ActionButton
+              onClick={() => toggleQueued(r.title)}
+              pressed={isQueued}
+              Icon={isQueued ? Check : ArrowUpRight}
+              title={ACTION_NOTE[r.action]}
             >
-              {ACTION_LABEL[r.action]}
-              <ArrowRight className="w-2.5 h-2.5" strokeWidth={2} />
-            </button>
+              {isQueued ? "Queued" : ACTION_LABEL[r.action]}
+            </ActionButton>
           </div>
         </div>
-      ))}
+        );
+      })}
 
       {ranked.length > 0 && (
         <div className="px-3 py-2 border-t border-white/[0.06] bg-white/[0.01]">

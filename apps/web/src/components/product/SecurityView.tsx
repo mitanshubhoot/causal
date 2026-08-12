@@ -67,14 +67,31 @@ function defaultFlowId(): string {
   return (ORDERED.find((e) => e.flow.length >= 2) ?? ORDERED[0]).id;
 }
 
+/**
+ * One ring for every control this shell draws. The three tabs were built
+ * separately and drifted; the graph, the picker and the taint toggle all use
+ * `ring-1 ring-indigo-400/70`, so the shell's own buttons do too rather than
+ * falling through to the browser's default outline.
+ */
+const FOCUS_RING =
+  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/70";
+
+/**
+ * Off is a state that has to be readable. A disabled control here wears the
+ * same dress as the Events tab's `Reveal payload`: dashed border, dimmed but
+ * still legible text, `not-allowed` cursor — and it says WHY, both in its
+ * tooltip and, for the steppers, in the ordering caption beside them.
+ */
 function StepButton({
   label,
   disabled,
+  disabledReason,
   onClick,
   children,
 }: {
   label: string;
   disabled: boolean;
+  disabledReason: string;
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -82,9 +99,9 @@ function StepButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      title={label}
-      aria-label={label}
-      className="flex items-center justify-center w-5 h-5 rounded border border-white/[0.06] text-zinc-500 transition-colors enabled:hover:text-zinc-200 enabled:hover:border-white/15 disabled:text-zinc-800 disabled:border-white/[0.03]"
+      title={disabled ? disabledReason : label}
+      aria-label={disabled ? `${label} — ${disabledReason}` : label}
+      className={`flex items-center justify-center w-7 h-7 rounded border border-white/[0.06] text-zinc-500 transition-colors ${FOCUS_RING} enabled:hover:text-zinc-200 enabled:hover:border-white/15 disabled:text-zinc-600 disabled:border-dashed disabled:border-zinc-700 disabled:cursor-not-allowed`}
     >
       {children}
     </button>
@@ -127,6 +144,8 @@ export function SecurityView({ onOpenTrace }: { onOpenTrace: (id: string) => voi
   const focused = focusId ? getEvent(focusId) : undefined;
   const flowEvent = useMemo(() => getEvent(flowId), [flowId]);
   const flowIndex = useMemo(() => ORDERED.findIndex((e) => e.id === flowId), [flowId]);
+  const atFirstFlow = flowIndex <= 0;
+  const atLastFlow = flowIndex < 0 || flowIndex >= ORDERED.length - 1;
 
   return (
     <div className="h-full flex flex-col">
@@ -170,7 +189,8 @@ export function SecurityView({ onOpenTrace }: { onOpenTrace: (id: string) => voi
                   <button
                     key={b.key}
                     onClick={b.go}
-                    className={`font-mono text-[10px] tracking-[0.1em] uppercase px-1.5 py-0.5 rounded border transition-colors ${
+                    title={`Open ${focused.id} in the ${b.label} tab`}
+                    className={`font-mono text-[10px] tracking-[0.1em] uppercase px-2 py-1.5 rounded border transition-colors ${FOCUS_RING} ${
                       tab === b.key
                         ? "border-white/10 bg-white/[0.05] text-zinc-300"
                         : "border-white/[0.06] text-zinc-500 hover:text-zinc-200 hover:border-white/15"
@@ -190,7 +210,7 @@ export function SecurityView({ onOpenTrace }: { onOpenTrace: (id: string) => voi
                 <button
                   key={key}
                   onClick={() => setTab(key)}
-                  className={`flex items-center gap-1.5 flex-shrink-0 text-[12.5px] py-2 border-b-2 transition-colors ${
+                  className={`flex items-center gap-1.5 flex-shrink-0 text-[12.5px] py-2 border-b-2 transition-colors rounded-t-sm ${FOCUS_RING} ${
                     active
                       ? "border-indigo-400/80 text-zinc-100"
                       : "border-transparent text-zinc-500 hover:text-zinc-300"
@@ -254,24 +274,32 @@ export function SecurityView({ onOpenTrace }: { onOpenTrace: (id: string) => voi
                   <div className="flex items-center gap-1">
                     <StepButton
                       label="Previous flow"
-                      disabled={flowIndex <= 0}
+                      disabled={atFirstFlow}
+                      disabledReason="Already at the highest-priority flow"
                       onClick={() => selectFlow(ORDERED[flowIndex - 1].id)}
                     >
                       <ChevronLeft className="w-3.5 h-3.5" />
                     </StepButton>
                     <StepButton
                       label="Next flow"
-                      disabled={flowIndex < 0 || flowIndex >= ORDERED.length - 1}
+                      disabled={atLastFlow}
+                      disabledReason="Already at the lowest-priority flow"
                       onClick={() => selectFlow(ORDERED[flowIndex + 1].id)}
                     >
                       <ChevronRight className="w-3.5 h-3.5" />
                     </StepButton>
                   </div>
-                  <span className="font-mono text-[10px] text-zinc-700">by priority</span>
+                  {/* The caption carries the ordering AND, at either end of it,
+                      the reason a stepper is off — so "why is ‹ dead" is
+                      answered on the page rather than only in a tooltip. */}
+                  <span className="font-mono text-[10px] text-zinc-700">
+                    by priority
+                    {atFirstFlow ? " · at the highest" : atLastFlow ? " · at the lowest" : ""}
+                  </span>
                   <button
                     onClick={() => openInEvents(flowEvent.id)}
                     title={`Open ${flowEvent.id} in the Events tab`}
-                    className="ml-auto flex-shrink-0 flex items-center gap-1 font-mono text-[10px] tracking-[0.1em] uppercase text-zinc-500 hover:text-zinc-200 border border-white/[0.06] hover:border-white/15 rounded px-2 py-1 transition-colors"
+                    className={`ml-auto flex-shrink-0 flex items-center gap-1 font-mono text-[10px] tracking-[0.1em] uppercase text-zinc-500 hover:text-zinc-200 border border-white/[0.06] hover:border-white/15 rounded px-2 py-1.5 transition-colors ${FOCUS_RING}`}
                   >
                     Open incident <ArrowUpRight className="w-3 h-3" />
                   </button>

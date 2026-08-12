@@ -49,7 +49,7 @@ import type {
   Severity,
   Tier,
 } from "@/lib/security-types";
-import { CopyButton, MonoLabel, Section } from "../ui";
+import { CopyButton, MonoLabel, PANEL, Section } from "../ui";
 import {
   BoundaryLine,
   CapabilityChip,
@@ -58,6 +58,7 @@ import {
   RedactedWitness,
   SeverityBadge,
   StandardsRow,
+  TRUST_META,
   TierChip,
   TrustChip,
   defang,
@@ -65,6 +66,7 @@ import {
 } from "./trust-ui";
 import {
   ArrowUpRight,
+  ChevronDown,
   ChevronLeft,
   CornerDownRight,
   Layers,
@@ -153,6 +155,23 @@ const ago = (iso: string) => `${elapsed(Date.parse(AS_OF) - Date.parse(iso))} ag
 /** Events with no trace carry an em dash, not a fake id. */
 const hasTrace = (e: SecurityEvent) => e.traceId !== "" && e.traceId !== "—";
 
+/**
+ * The whole flow as recoverable text, for the `title` on a preview that can
+ * still clip on the longest paths. Hosts are defanged here exactly as they are
+ * on screen — a tooltip is chrome, not a second place the rules relax.
+ */
+function flowTitle(e: SecurityEvent): string {
+  const path = e.flow
+    .map(
+      (n) =>
+        `${TRUST_META[n.origin].short} ${defang(n.name)} #${n.spanId}` +
+        (n.bytes === undefined ? "" : ` · ${fmtBytes(n.bytes)}`) +
+        (n.violating === true ? " · violating sink" : ""),
+    )
+    .join("  →  ");
+  return `${path}  ⇒  ${e.outcome}${e.enforced ? "" : " · unenforced"}`;
+}
+
 // ── Vocabulary ────────────────────────────────────────────────────────
 
 const CLASS_ORDER: EventClass[] = ["critical", "blocked", "suspicious", "informational"];
@@ -226,12 +245,31 @@ const ACTION_NOTE: Record<Remediation["action"], string> = {
   arm_rule: "Moves the rule one stage along monitor → canary → enforce, gated on its readiness bar. Not wired in this demo.",
 };
 
+/**
+ * A rule mode renders identically wherever it appears. These four tones and the
+ * chip geometry below are byte-identical to the Overview's (`SecurityOverview.tsx`
+ * MODE_TONE / ModeChip) — the same `TB-04 canary` must not be a different amber
+ * on two tabs of one console. They are duplicated rather than shared only because
+ * `trust-ui.tsx` is owned elsewhere this pass; the pair belongs next to
+ * OutcomeChip/ClassChip/TierChip and should move there in one edit.
+ */
 const MODE_TONE: Record<string, string> = {
   enforce: "text-emerald-400 border-emerald-500/30 bg-emerald-500/[0.08]",
-  canary: "text-amber-400 border-amber-500/25 bg-amber-500/[0.07]",
+  canary: "text-amber-400 border-amber-500/30 bg-amber-500/[0.07]",
   monitor: "text-zinc-400 border-white/10 bg-white/[0.03]",
-  off: "text-red-400/80 border-red-500/30 bg-transparent",
+  off: "text-red-400 border-red-500/40 bg-transparent",
 };
+
+function ModeChip({ mode, canaryPct }: { mode: string; canaryPct?: number }) {
+  const label = mode === "canary" && canaryPct !== undefined ? `canary ${canaryPct}%` : mode;
+  return (
+    <span
+      className={`inline-flex items-center font-mono text-[9px] tracking-[0.1em] font-semibold px-1.5 py-0.5 rounded border ${MODE_TONE[mode]}`}
+    >
+      {label}
+    </span>
+  );
+}
 
 // ── Small chips ───────────────────────────────────────────────────────
 
@@ -423,8 +461,22 @@ function dimsToFilter(d: Partial<Dims>, query: string): EventFilter {
   };
 }
 
+/**
+ * The queue's columns. Below `xl` the two identifier columns — agent and tool —
+ * are dropped rather than pushed off the right edge behind an overlay scrollbar:
+ * a column you cannot see and cannot discover is worse than one that is honestly
+ * absent, and both facts are one click away on the incident. This is the same
+ * drop-columns pattern the detector and eval tables use (`views.tsx:132`).
+ *
+ * xl track budget: 24px row padding + 932px of tracks + 84px of gaps = 1040px,
+ * against 1056px of usable width at a 1280px viewport. Below xl: 24 + 684 + 60
+ * = 768px, which clears the narrowest supported width with room to spare.
+ */
 const GRID =
-  "grid grid-cols-[54px_78px_98px_122px_minmax(240px,1fr)_150px_128px_92px] gap-x-3 items-start";
+  "grid grid-cols-[54px_78px_98px_122px_minmax(240px,1fr)_92px] xl:grid-cols-[54px_78px_98px_122px_minmax(240px,1fr)_128px_112px_92px] gap-x-3 items-start";
+
+/** Dropped below xl — see GRID. */
+const XL_ONLY = "hidden xl:block";
 
 function FilterChip({
   label,
@@ -439,15 +491,28 @@ function FilterChip({
   onClick: () => void;
   title?: string;
 }) {
+  // A chip that can only ever produce an empty table is inert, and says so with
+  // the cursor and with a reason on hover. `aria-disabled` rather than
+  // `disabled`, because a disabled button in Chrome swallows its own tooltip and
+  // the reason is the whole point. An ACTIVE chip is never inert even at 0 —
+  // the count is computed with this dimension cleared, so deselecting it has to
+  // stay possible.
+  const inert = count === 0 && !active;
   return (
     <button
-      onClick={onClick}
-      title={title}
-      className={`inline-flex items-center gap-1.5 font-mono text-[10.5px] px-1.5 py-0.5 rounded border transition-colors ${
+      onClick={inert ? undefined : onClick}
+      aria-disabled={inert || undefined}
+      aria-pressed={active}
+      title={
+        inert
+          ? `No event under the other filters is ${label} — nothing to select. Clear or widen the filters to bring it back.`
+          : title
+      }
+      className={`inline-flex items-center gap-1.5 font-mono text-[10.5px] px-2 py-1 rounded border transition-colors ${
         active
           ? "text-zinc-100 border-white/25 bg-white/[0.07]"
-          : count === 0
-            ? "text-zinc-700 border-white/[0.04]"
+          : inert
+            ? "text-zinc-600 border-white/[0.05] cursor-not-allowed"
             : "text-zinc-500 border-white/[0.06] hover:text-zinc-300 hover:border-white/15"
       }`}
     >
@@ -558,7 +623,7 @@ function EventList({
       </div>
 
       {/* Filters. Panes never collapse in this product; controls shrink. */}
-      <div className="rounded-lg border border-white/[0.06] p-3 mb-4 space-y-2">
+      <div className={`rounded-lg ${PANEL} p-3 mb-4 space-y-2`}>
         {groups.map((g) => (
           <div key={g.key} className="flex items-start gap-2.5">
             <MonoLabel className="w-[62px] flex-shrink-0 pt-1">{g.label}</MonoLabel>
@@ -594,7 +659,8 @@ function EventList({
                 setQuery("");
                 setSaved(null);
               }}
-              className="inline-flex items-center gap-1 font-mono text-[10.5px] text-zinc-500 hover:text-zinc-200 flex-shrink-0"
+              title="Clear every filter, the search box and the saved view"
+              className="inline-flex items-center gap-1 font-mono text-[10.5px] text-zinc-400 border border-white/[0.06] rounded px-2 py-1 hover:text-zinc-100 hover:border-white/15 transition-colors flex-shrink-0"
             >
               <X className="w-3 h-3" /> clear
             </button>
@@ -615,13 +681,24 @@ function EventList({
         {view && <span className="font-mono text-[10.5px] text-zinc-600">· {view.label}</span>}
       </div>
 
-      <div className="rounded-lg border border-white/[0.06] overflow-x-auto">
-        {/* 24px of row padding + 962px of tracks + 84px of gaps. Below this the
-            grid would spill out of its own scroll box instead of scrolling. */}
-        <div className="min-w-[1070px]">
+      <div className={`rounded-lg ${PANEL} overflow-x-auto`}>
+        {/* The track budget for each breakpoint — see GRID. Below this the grid
+            would spill out of its own scroll box instead of scrolling. */}
+        <div className="min-w-[768px] xl:min-w-[1040px]">
           <div className={`${GRID} px-3 py-2 border-b border-white/[0.06] bg-white/[0.02]`}>
-            {["priority", "severity", "class", "time · utc", "event", "agent", "tool", "status"].map((h) => (
-              <MonoLabel key={h}>{h}</MonoLabel>
+            {[
+              { h: "priority" },
+              { h: "severity" },
+              { h: "class" },
+              { h: "time · utc" },
+              { h: "event" },
+              { h: "agent", only: XL_ONLY },
+              { h: "tool", only: XL_ONLY },
+              { h: "status" },
+            ].map((c) => (
+              <MonoLabel key={c.h} className={c.only ?? ""}>
+                {c.h}
+              </MonoLabel>
             ))}
           </div>
 
@@ -660,21 +737,39 @@ function EventList({
                   <OccurrenceBadge n={e.occurrences} />
                   {e.criticalReason && <ReasonChip reason={e.criticalReason} />}
                 </span>
-                {/* The flow is the most information-dense thing a row can carry.
-                    Clipped with a mask so it reads as a path that continues,
-                    rather than a line that wrapped. */}
+              </span>
+
+              <span className={`font-mono text-[10.5px] text-zinc-400 truncate pt-1 ${XL_ONLY}`} title={e.agent}>
+                {e.agent}
+              </span>
+              <span
+                className={`font-mono text-[10.5px] text-zinc-500 truncate pt-1 ${XL_ONLY}`}
+                title={e.tool ?? "This event is not a tool call."}
+              >
+                {e.tool ?? "—"}
+              </span>
+              <span className="pt-0.5">
+                <StatusChip status={e.status} />
+              </span>
+
+              {/* The flow is the most information-dense thing a row can carry, and
+                  it is the sink and the verdict at the END of it that decide the
+                  row — so it gets the full width of the table rather than a 272px
+                  column that hid four fifths of every path. The mask still fades
+                  the longest ones, and `title` carries the whole thing as text. */}
+              <span
+                className="col-span-full mt-1.5 flex items-center gap-2 min-w-0"
+                title={flowTitle(e)}
+              >
                 <span
-                  className="block mt-1 relative overflow-hidden [&>div]:overflow-x-hidden [mask-image:linear-gradient(to_right,black_86%,transparent)]"
+                  className="block relative min-w-0 flex-1 overflow-hidden [&>div]:overflow-x-hidden [mask-image:linear-gradient(to_right,black_92%,transparent)]"
                   aria-hidden
                 >
                   <BoundaryLine event={e} compact />
                 </span>
-              </span>
-
-              <span className="font-mono text-[10.5px] text-zinc-400 truncate pt-1">{e.agent}</span>
-              <span className="font-mono text-[10.5px] text-zinc-500 truncate pt-1">{e.tool ?? "—"}</span>
-              <span className="pt-0.5">
-                <StatusChip status={e.status} />
+                <span className="font-mono text-[10px] text-zinc-600 tabular-nums flex-shrink-0">
+                  {e.flow.length} hop{e.flow.length === 1 ? "" : "s"}
+                </span>
               </span>
             </button>
           ))}
@@ -938,6 +1033,29 @@ function RemediationRow({ item, rank }: { item: Remediation; rank: number }) {
                 {(item.deltaScore / item.diffLines).toFixed(2)} pts/line
               </span>
             )}
+            {/* The action sits in the meta row, not out at the right margin, so
+                the note it opens lands directly beneath the control that opened
+                it. Neutral and chevroned rather than indigo-and-arrow: the arrow
+                idiom belongs to the links that really navigate — the lineage
+                rows and the trace chip — and this one only discloses text. The
+                treatment is the Overview's action button, so the same
+                `Open PR` is one control across both tabs. */}
+            <button
+              onClick={() => setNote((v) => !v)}
+              aria-expanded={note}
+              title={note ? "Hide what this action does" : "What does this action do?"}
+              className={`inline-flex items-center gap-1.5 font-mono text-[10.5px] tracking-[0.06em] rounded border px-2 py-1 transition-colors ${
+                note
+                  ? "text-zinc-100 border-white/25 bg-white/[0.07]"
+                  : "text-zinc-300 border-white/10 hover:text-zinc-100 hover:border-white/25"
+              }`}
+            >
+              {ACTION_LABEL[item.action]}
+              <ChevronDown
+                className={`w-2.5 h-2.5 transition-transform ${note ? "" : "-rotate-90"}`}
+                strokeWidth={2}
+              />
+            </button>
           </div>
           {note && (
             <p className="text-[11.5px] text-zinc-500 mt-2 border-l border-white/10 pl-2 leading-relaxed">
@@ -945,12 +1063,6 @@ function RemediationRow({ item, rank }: { item: Remediation; rank: number }) {
             </p>
           )}
         </div>
-        <button
-          onClick={() => setNote((v) => !v)}
-          className="flex-shrink-0 inline-flex items-center gap-1.5 font-mono text-[11px] text-indigo-300 border border-indigo-400/25 rounded-md px-2 py-1 hover:bg-indigo-500/[0.08] transition-colors"
-        >
-          {ACTION_LABEL[item.action]} <ArrowUpRight className="w-3 h-3" />
-        </button>
       </div>
     </div>
   );
@@ -1066,12 +1178,7 @@ function EventDetail({
             <CopyButton value={event.ruleId} />
           </span>
           {rule && <span className="font-mono text-[10.5px] text-zinc-500">{rule.name}</span>}
-          {rule && (
-            <Chip tone={MODE_TONE[rule.mode]}>
-              {rule.mode}
-              {rule.mode === "canary" && rule.canaryPct !== undefined ? ` ${rule.canaryPct}%` : ""}
-            </Chip>
-          )}
+          {rule && <ModeChip mode={rule.mode} canaryPct={rule.canaryPct} />}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <MonoLabel className="text-zinc-600">trace</MonoLabel>
@@ -1145,9 +1252,14 @@ function EventDetail({
               {event.flow.length} hops · {fmtBytes(totalBytes)} carried
             </span>
             <span className="text-[11.5px] text-zinc-600 leading-relaxed min-w-0 flex-1">
-              {traceId
+              {/* Gated on the same predicate FlowHop uses to decide whether a hop
+                  is a button at all. Most demo traces have no explorer page, and
+                  telling an analyst to click a div is worse than saying nothing. */}
+              {traceId && explorerIncidentFor(traceId)
                 ? "Each hop is a separate row in spans, with its own io and parent, captured before anything was concatenated. Click one to open the trace."
-                : "This event has no single trace: it is a control or inventory fact, and the hops describe the boundary rather than one run."}
+                : traceId
+                  ? "Each hop is a separate row in spans, with its own io and parent, captured before anything was concatenated. This run is not in the demo trace set, so there is no explorer page to open from here."
+                  : "This event has no single trace: it is a control or inventory fact, and the hops describe the boundary rather than one run."}
             </span>
           </div>
         </Section>
@@ -1232,7 +1344,9 @@ function EventDetail({
         {/* 5 — ranked cuts, each phrased as an edit to the graph. */}
         <Section label="5 · Recommended remediation" count={event.remediation.length}>
           {event.remediation.length === 0 ? (
-            <p className="px-3 py-5 text-[11.5px] text-zinc-600 leading-relaxed">
+            /* The product's one empty state: px-4 py-8, centred, mono 12px —
+               the same as the queue above and as views.tsx / EvalsView. */
+            <p className="px-4 py-8 text-center font-mono text-[12px] text-zinc-600 leading-relaxed">
               No cut is proposed for this event. Nothing in the graph would change: the control held,
               or the finding is a record of something that already ran its course.
             </p>
@@ -1258,10 +1372,7 @@ function EventDetail({
                     {rule.id} v{event.ruleVersion}
                   </span>
                   <span className="text-[12px] text-zinc-400">{rule.name}</span>
-                  <Chip tone={MODE_TONE[rule.mode]}>
-                    {rule.mode}
-                    {rule.mode === "canary" && rule.canaryPct !== undefined ? ` ${rule.canaryPct}%` : ""}
-                  </Chip>
+                  <ModeChip mode={rule.mode} canaryPct={rule.canaryPct} />
                   <Chip
                     tone={
                       rule.usesModel

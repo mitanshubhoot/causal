@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 import { getObservabilityDemo } from "@/lib/mock-observability";
 import { TraceTree } from "./product/TraceTree";
 import { SpanDetail } from "./product/SpanDetail";
-import { SeverityChip } from "./product/ui";
+import { DETECTOR_LABEL, SeverityChip } from "./product/ui";
 
 /** Compact, live preview of the real product surface for the landing page —
  *  a mini trace explorer (tree + span detail) in the enterprise dark theme.
@@ -22,9 +22,18 @@ export function LandingProductPreview({ incidentId }: { incidentId: string }) {
           <span className="font-mono text-[11px] text-zinc-400">Trace</span>
           <span className="font-mono text-[11px] text-zinc-200 truncate">{demo.traceId}</span>
           <SeverityChip severity={demo.severity} />
+          {/* The verdict, not a teaser. This read demo.finding only to pick the
+              selected span and then advertised a Copilot that is not in this
+              frame — a chip for an absent feature reads as broken. Showing what
+              the judge actually decided is the trace→detection handoff, and the
+              data was already in scope. */}
           {demo.finding && (
-            <span className="ml-auto flex items-center gap-1 font-mono text-[10px] text-indigo-300/80">
-              <Sparkles className="w-3 h-3" /> Copilot ready
+            <span className="ml-auto flex items-center gap-1.5 font-mono text-[10px] flex-shrink-0">
+              <ShieldAlert className="w-3 h-3 text-red-400" />
+              <span className="text-zinc-300">{DETECTOR_LABEL[demo.finding.detector]}</span>
+              <span className="text-zinc-500 tabular-nums">
+                {Math.round(demo.finding.confidence * 100)}%
+              </span>
             </span>
           )}
         </div>

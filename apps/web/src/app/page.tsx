@@ -2,12 +2,26 @@
 
 import React, { useEffect, useRef } from "react";
 import Link from "next/link";
-import { FEATURED_INCIDENT_ID } from "@/lib/mock-data";
+import {
+  FEATURED_INCIDENT_ID,
+  getMockPostMortem,
+  getMockReplay,
+  getMockTrace,
+} from "@/lib/mock-data";
 import { getDatasets, getRuns } from "@/lib/mock-evals";
-import { DETECTIONS, getEvent } from "@/lib/mock-security";
+import { getAllDemos, getDetectors, getTraceList } from "@/lib/mock-observability";
+import {
+  ASI_IDS,
+  DETECTIONS,
+  POSTURE,
+  SECURITY_EVENTS,
+  computeScore,
+  getEvent,
+} from "@/lib/mock-security";
 import type { Origin } from "@/lib/security-types";
 import { ScrambleText } from "@/components/ScrambleText";
 import { LandingTraceDemo } from "@/components/LandingTraceDemo";
+import { LandingCapabilityTour } from "@/components/LandingCapabilityTour";
 import { FailureTicker } from "@/components/FailureTicker";
 import { InstallWidget } from "@/components/InstallWidget";
 import { MagneticButton } from "@/components/MagneticButton";
@@ -28,6 +42,7 @@ import {
   Cpu,
   Database,
   ExternalLink,
+  RotateCcw,
 } from "lucide-react";
 import {
   motion,
@@ -951,6 +966,302 @@ function StatsSection() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DEPTH — one trace, and every artifact it produced
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The section that answers "what else is in there".
+ *
+ * It sits immediately after the live trace explorer, which opens on the featured
+ * incident, so the reader has just been clicking around the exact trace this
+ * section counts. Part one is what that one trace produced — spans, prompts, a
+ * verdict, a causal chain, a PR, a post-mortem, a replay, golden cases — each
+ * tile linking to the surface that holds it. Part two is what lives on each of
+ * the five product routes, stated as an inventory rather than an adjective.
+ *
+ * Rules this section holds itself to:
+ *  - Every number is a reduction over the same modules the product reads
+ *    (mock-observability / mock-data / mock-evals / mock-security). Nothing is
+ *    typed in, including the zero — the featured trace raises no security event
+ *    and the tile says so rather than borrowing another trace's count.
+ *  - Every href is a route that exists under app/.
+ *  - Security is described as labelling, detecting and explaining. Never
+ *    blocking: there is no enforcement path in this product yet.
+ */
+function DepthSection() {
+  // getAllDemos() is typed IncidentDemo[], so finding / rootCause / fixPr are
+  // guaranteed present — unlike getObservabilityDemo(), whose healthy traces
+  // legitimately have none of the three.
+  const demo = getAllDemos().find((d) => d.incidentId === FEATURED_INCIDENT_ID);
+  if (!demo) return null;
+
+  const incident = `/incidents/${FEATURED_INCIDENT_ID}`;
+  const graph = getMockTrace(FEATURED_INCIDENT_ID);
+  const postMortem = getMockPostMortem(FEATURED_INCIDENT_ID);
+  const replay = getMockReplay(FEATURED_INCIDENT_ID);
+
+  // ── What this one trace carries ──────────────────────────────────────────
+  const spanKinds = new Set(demo.spans.map((s) => s.kind)).size;
+  const erroredSpans = demo.spans.filter((s) => s.status === "error").length;
+  const ioSpans = demo.spans.filter((s) => Boolean(s.io?.input || s.io?.output)).length;
+  const gitSpans = demo.spans.filter((s) => Boolean(s.git)).length;
+  const checksPassed = demo.fixPr.checks.filter((c) => c.status === "pass").length;
+  const files = demo.fixPr.filesChanged;
+
+  // ── What it produced downstream ──────────────────────────────────────────
+  const pmSections = (postMortem.markdown.match(/^##\s/gm) ?? []).length;
+  const ticketLabels = ((postMortem.linearTicket as { labels?: string[] }).labels ?? []).length;
+  const replayFidelity = Math.round(replay.fidelityScore * 100);
+  const replayDiffLines = replay.diff?.length ?? 0;
+
+  const cases = getDatasets()
+    .flatMap((d) => d.items)
+    .filter((i) => i.traceId === FEATURED_INCIDENT_ID);
+  const caseAssertions = cases.reduce((n, c) => n + c.assertions.length, 0);
+  const promotedFrom = cases[0]?.fromFinding;
+
+  // The honest zero: no security event references this trace. Counting how many
+  // demo traces do resolve to one keeps that zero readable as a fact rather
+  // than as a hole in the data.
+  const demos = getAllDemos();
+  const eventsOnTrace = SECURITY_EVENTS.filter((e) => e.traceId === demo.traceId).length;
+  const tracesWithEvents = demos.filter((d) =>
+    SECURITY_EVENTS.some((e) => e.traceId === d.traceId)
+  ).length;
+
+  const artifacts: { label: string; value: string; detail: string; href: string; see: string }[] = [
+    {
+      label: "Trace",
+      value: `${demo.spans.length} spans`,
+      detail: `${spanKinds} span kinds, ${erroredSpans} of them errored — with tokens and spend rolled up through every parent.`,
+      href: incident,
+      see: "Open the tree",
+    },
+    {
+      label: "Prompts",
+      value: `${ioSpans} spans`,
+      detail: "carry the input and the output the model actually saw. Copy either, or expand it to full height and read the whole thing.",
+      href: incident,
+      see: "Read one",
+    },
+    {
+      label: "Git context",
+      value: `${gitSpans} spans`,
+      detail: `resolve to a file and line at commit ${demo.rootCause.commit}, copyable as file:line.`,
+      href: incident,
+      see: "See the source",
+    },
+    {
+      label: "Verdict",
+      value: demo.finding.detector.replace(/_/g, " "),
+      detail: `confidence ${demo.finding.confidence.toFixed(2)}, judged by ${demo.finding.judgeModel} — with the span that triggered it named.`,
+      href: "/detectors",
+      see: "See the detector",
+    },
+    {
+      label: "Causal chain",
+      value: `${graph.nodes.length} nodes`,
+      detail: `${graph.edges.length} edges from intent to incident, ${graph.criticalPath.length} of them on the critical path. The root cause sits ${demo.rootCause.hopsUpstream} hops upstream.`,
+      href: incident,
+      see: "Walk the graph",
+    },
+    {
+      label: "Fix PR",
+      value: `#${demo.fixPr.number}`,
+      detail: `+${demo.fixPr.additions} −${demo.fixPr.deletions} across ${files} file${files === 1 ? "" : "s"}, ${checksPassed} of ${demo.fixPr.checks.length} checks passed including causal-replay.`,
+      href: incident,
+      see: "Read the diff",
+    },
+    {
+      label: "Post-mortem",
+      value: `${pmSections} sections`,
+      detail: `written from the causal chain, plus a Linear ticket carrying ${ticketLabels} labels and a CLAUDE.md rule to paste into the repo so the agent does not repeat it.`,
+      href: `${incident}/postmortem`,
+      see: "Generate it",
+    },
+    {
+      label: "Replay",
+      value: `${replayFidelity}% fidelity`,
+      detail: `the suggested fix re-run against the captured snapshot, scored against the original output across ${replayDiffLines} changed lines.`,
+      href: `${incident}/replay`,
+      see: "Run the sandbox",
+    },
+    {
+      label: "Golden cases",
+      value: `${cases.length} cases`,
+      detail: promotedFrom
+        ? `carrying ${caseAssertions} machine-checkable assertions, all promoted from finding ${promotedFrom} and re-run on every release since.`
+        : `carrying ${caseAssertions} machine-checkable assertions, re-run on every release.`,
+      href: "/evals",
+      see: "Open the set",
+    },
+    {
+      label: "Security events",
+      value: `${eventsOnTrace}`,
+      detail:
+        eventsOnTrace === 0
+          ? `nothing in the security corpus references this trace — ${tracesWithEvents} of the ${demos.length} demo traces do, and their span panel says which.`
+          : `raised on this exact trace, listed in the span panel and stamped on the incident row.`,
+      href: "/security",
+      see: "Open the console",
+    },
+  ];
+
+  // ── What lives on each surface ───────────────────────────────────────────
+  const traces = getTraceList();
+  const healthyTraces = traces.filter((t) => t.status === "ok").length;
+  const flaggedTraces = traces.length - healthyTraces;
+
+  const detectors = getDetectors();
+  const detectorFindings = detectors.reduce((n, d) => n + d.findings.length, 0);
+  const detectorRuns = detectors.reduce((n, d) => n + d.runs.length, 0);
+  const cleanRuns = detectors.reduce(
+    (n, d) => n + d.runs.filter((r) => !r.identified).length,
+    0
+  );
+
+  const datasets = getDatasets();
+  const goldenCases = datasets.flatMap((d) => d.items);
+  const allAssertions = goldenCases.flatMap((c) => c.assertions);
+  const assertionKinds = new Set(allAssertions.map((a) => a.kind)).size;
+  const evalRuns = datasets.flatMap((d) => getRuns(d.id)).length;
+
+  const occurrences = SECURITY_EVENTS.reduce((n, e) => n + e.occurrences, 0);
+  const deterministic = DETECTIONS.filter((d) => !d.usesModel).length;
+  const posture = computeScore(POSTURE);
+
+  const surfaces = [
+    {
+      route: "/incidents",
+      inventory: `${traces.length} traces · ${flaggedTraces} flagged · ${healthyTraces} healthy`,
+      depth:
+        "Open a healthy one and there is no banner, no actions, and a Copilot briefing that opens by saying no detector flagged this run. ⌘K reaches any trace, any view, any action from anywhere.",
+    },
+    {
+      route: "/detectors",
+      inventory: `${detectors.length} judges · ${detectorFindings} findings · ${detectorRuns} evaluation runs`,
+      depth: `${cleanRuns} of those runs found nothing and are listed anyway — the record that every trace is graded, not only the ones that already threw.`,
+    },
+    {
+      route: "/security",
+      inventory: `${SECURITY_EVENTS.length} events · ${occurrences.toLocaleString()} occurrences · ${DETECTIONS.length} detections, ${deterministic} reading no natural language · ${ASI_IDS.length} ASI ids`,
+      depth: `Containment scores ${posture.score} with its whole formula on screen, dimmed and marked UNPROVEN AT HEAD because the commit it was measured at is not HEAD. The flow map taints a path forward or backward through the graph and counts the nodes it reaches. It labels, detects and explains what got through — it does not block.`,
+    },
+    {
+      route: "/evals",
+      inventory: `${datasets.length} sets · ${goldenCases.length} golden cases · ${allAssertions.length} assertions across ${assertionKinds} kinds · ${evalRuns} runs`,
+      depth:
+        "Every case puts what the agent actually produced next to the judge's written reasoning, then a pass/fail block per release — so a regression has a date and a fix has proof it held.",
+    },
+    {
+      route: "/dashboard",
+      inventory: "Every figure above, reduced once",
+      depth:
+        "Observability and security on one screen, agreeing with each other because they are two readings of one corpus rather than two products stapled together.",
+    },
+  ];
+
+  return (
+    <section className="py-32 px-8 border-b border-white/[0.06]" id="depth">
+      <div className="max-w-7xl mx-auto">
+        <motion.div
+          variants={staggerContainer}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-80px" }}
+          className="mb-16"
+        >
+          <motion.p variants={fadeUp} className="mb-4">
+            <ScrambleText
+              text="[ WHAT THAT TRACE PRODUCED ]"
+              className="font-mono text-[11px] tracking-[0.2em] text-white/45 uppercase"
+            />
+          </motion.p>
+          <motion.h2
+            variants={fadeUp}
+            className="text-[36px] sm:text-[48px] font-light tracking-[-0.03em] text-white"
+          >
+            One run, and everything Causal made of it
+          </motion.h2>
+          <motion.p variants={fadeUp} className="mt-4 text-[15px] text-white/45 max-w-2xl leading-relaxed">
+            The tree above is {demo.externalId} — {demo.service}, {demo.spans.length} spans, {demo.model}.
+            Every number below is counted off that same run rather than written here, and every tile
+            opens the screen it came from.
+          </motion.p>
+        </motion.div>
+
+        {/* 10 tiles: clean at 1, 2 and 5 columns, so no row is ever part-filled
+            and the container's hairline background is never left showing. */}
+        <motion.div
+          variants={staggerFast}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-60px" }}
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-[1px] bg-white/[0.06]"
+        >
+          {artifacts.map(({ label, value, detail, href, see }) => (
+            <motion.div key={label} variants={cardVariant} className="xai-card bg-black group">
+              <Link href={href} className="flex flex-col h-full p-6">
+                <p className="font-mono text-[9px] tracking-[0.2em] text-white/25 uppercase mb-3">
+                  {label}
+                </p>
+                <p className="text-[19px] font-light tracking-[-0.02em] text-white mb-2.5 tabular-nums break-words">
+                  {value}
+                </p>
+                <p className="text-[12px] text-white/28 leading-relaxed flex-1">{detail}</p>
+                <span className="inline-flex items-center gap-1 mt-5 font-mono text-[9px] tracking-[0.14em] uppercase text-white/25 group-hover:text-white/70 transition-colors">
+                  {see} <ArrowUpRight className="w-3 h-3" />
+                </span>
+              </Link>
+            </motion.div>
+          ))}
+        </motion.div>
+
+        {/* The surfaces themselves. A bordered list rather than a grid, so the
+            row count never has to divide by anything. */}
+        <motion.div
+          variants={staggerFast}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-60px" }}
+          className="mt-14"
+        >
+          <motion.p
+            variants={fadeUp}
+            className="font-mono text-[10px] tracking-[0.2em] text-white/25 uppercase mb-5"
+          >
+            And what is waiting on each surface
+          </motion.p>
+          <div className="border border-white/[0.06] rounded-xl overflow-hidden">
+            {surfaces.map(({ route, inventory, depth }, i) => (
+              <motion.div key={route} variants={cardVariant}>
+                <Link
+                  href={route}
+                  className={`group grid grid-cols-1 md:grid-cols-[190px_1fr] gap-x-8 gap-y-2 px-6 py-6 hover:bg-white/[0.02] transition-colors ${
+                    i > 0 ? "border-t border-white/[0.06]" : ""
+                  }`}
+                >
+                  <span className="font-mono text-[12px] text-white/60 group-hover:text-white transition-colors inline-flex items-center gap-1.5">
+                    {route}
+                    <ArrowUpRight className="w-3 h-3 text-white/25 group-hover:text-white/70 transition-colors" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-mono text-[11px] text-white/40 tabular-nums leading-relaxed mb-2">
+                      {inventory}
+                    </span>
+                    <span className="block text-[13px] text-white/28 leading-relaxed">{depth}</span>
+                  </span>
+                </Link>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BENEFIT SECTIONS — full-screen 01 / 02 / 03
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1640,29 +1951,50 @@ function HowItWorksSection() {
           viewport={{ once: true, margin: "-60px" }}
           className="grid grid-cols-1 md:grid-cols-2 gap-[1px] bg-white/[0.06]"
         >
-          {steps.map(({ num, icon: Icon, title, description, code }) => (
-            <motion.div key={num} variants={cardVariant} className="xai-card bg-black p-8">
-              <div className="flex items-start gap-5">
-                <div className="flex-shrink-0 w-10 h-10 rounded-full border border-white/10 flex items-center justify-center">
-                  <Icon className="w-4 h-4 text-white/50" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className="font-mono text-[10px] tracking-[0.15em] text-white/20">{num}</span>
-                    <h3 className="text-[16px] font-medium text-white">{title}</h3>
+          {steps.map(({ num, icon: Icon, title, description, code }, i) => {
+            // The 1px "gaps" are this container's own background showing between
+            // black cards, so an odd step count would paint the empty cell as a
+            // grey block. Rather than pad with a blank card, the last step — the
+            // fix PR, which is the point the other four build to — takes the
+            // whole final row, and lays its prose beside its code so the wide
+            // cell reads as emphasis instead of a stretched card.
+            const wide = i === steps.length - 1 && steps.length % 2 !== 0;
+            return (
+              <motion.div
+                key={num}
+                variants={cardVariant}
+                className={`xai-card bg-black p-8 ${wide ? "md:col-span-2" : ""}`}
+              >
+                <div className="flex items-start gap-5">
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full border border-white/10 flex items-center justify-center">
+                    <Icon className="w-4 h-4 text-white/50" />
                   </div>
-                  <p className="text-[13px] text-white/30 leading-relaxed mb-5">{description}</p>
-                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg p-4 font-mono text-[11px] text-white/25 leading-relaxed whitespace-pre">
-                    {code}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="font-mono text-[10px] tracking-[0.15em] text-white/20">{num}</span>
+                      <h3 className="text-[16px] font-medium text-white">{title}</h3>
+                    </div>
+                    <div className={wide ? "md:flex md:items-start md:gap-8" : ""}>
+                      <p
+                        className={`text-[13px] text-white/30 leading-relaxed mb-5 ${
+                          wide ? "md:flex-1 md:mb-0" : ""
+                        }`}
+                      >
+                        {description}
+                      </p>
+                      <div
+                        className={`bg-white/[0.02] border border-white/[0.06] rounded-lg p-4 font-mono text-[11px] text-white/25 leading-relaxed whitespace-pre overflow-x-auto ${
+                          wide ? "md:flex-1 md:min-w-0" : ""
+                        }`}
+                      >
+                        {code}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </motion.div>
-          ))}
-          {/* Same reason as the features grid: the 1px "gaps" are this
-              container's own background between black cards, so an odd step
-              count would paint the empty cell as a grey block. */}
-          {steps.length % 2 !== 0 && <div aria-hidden className="hidden md:block bg-black" />}
+              </motion.div>
+            );
+          })}
         </motion.div>
       </div>
     </section>
@@ -1757,6 +2089,20 @@ function CausalModelStrip() {
 // FEATURES GRID — staggered card entrance
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The 1px "gaps" in the grids below are the container's own background showing
+ * between black cards, so a part-filled last row paints its empty cells as a
+ * grey block. Rather than pad the row with a blank card — which reads as a bug —
+ * the final card widens to close it. Keyed by cardCount % 3: a remainder of 1
+ * leaves one card alone on the row (span 3), a remainder of 2 leaves two (the
+ * last spans 2). At a clean multiple there is no key and nothing is applied.
+ * Class names are written out in full so Tailwind's scanner emits them.
+ */
+const LAST_CARD_SPAN: Record<number, string | undefined> = {
+  1: "lg:col-span-3",
+  2: "lg:col-span-2",
+};
+
 function FeaturesSection() {
   // Every claim links to where it can actually be seen in the demo. A feature
   // grid that only asserts is a feature grid nobody believes.
@@ -1771,6 +2117,7 @@ function FeaturesSection() {
     { icon: Cpu, title: "Agentic RCA", description: "An AI agent works in a sandbox with your source: real git blame and pickaxe to find the commit that introduced the failure, explained with a counterfactual.", href: incident, see: "Read an RCA" },
     { icon: GitBranch, title: "Commits, PRs and issues", description: "A failure is correlated not just to the commit but to the pull request that shipped it, the issues it closed, and open issues that already describe it.", href: incident, see: "See the correlation" },
     { icon: Code2, title: "Verified fix PRs", description: "Causal writes the fix and opens a pull request — diff, description, and a causal-replay check that runs your tests against the patch before claiming it's resolved.", href: incident, see: "Open a fix PR" },
+    { icon: RotateCcw, title: "Counterfactual replay", description: "Re-run a failed trace against its captured snapshot with the fix applied — or with your own system-prompt append — and read the original and modified output side by side, scored for fidelity with the changed lines counted.", href: `${incident}/replay`, see: "Open the replay sandbox" },
     { icon: Zap, title: "Causal Copilot", description: "Ask any trace a question — why did this fail, what's the fix, where did the cost go. Answers grounded in your spans, RCA and git history.", href: incident, see: "Ask the Copilot" },
     { icon: Database, title: "Datasets & evals", description: "Turn a production finding into a golden case in one click, then re-run every release against it — so a fix is verified and a regression can't come back unnoticed.", href: "/evals", see: "Open the eval sets" },
     { icon: FileText, title: "Token & cost accounting", description: "Tokens and spend recorded per span and rolled up through every parent, so you can see exactly which agent step, retry, or sub-agent burned the budget.", href: "/dashboard", see: "See the rollups" },
@@ -1803,7 +2150,7 @@ function FeaturesSection() {
           viewport={{ once: true, margin: "-60px" }}
           className="grid grid-cols-1 lg:grid-cols-3 gap-[1px] bg-white/[0.06]"
         >
-          {features.map(({ icon: Icon, title, description, href, see }) => {
+          {features.map(({ icon: Icon, title, description, href, see }, i) => {
             const inner = (
               <>
                 <div className="w-10 h-10 rounded-full border border-white/[0.08] flex items-center justify-center mb-5 group-hover:border-white/25 transition-colors">
@@ -1822,7 +2169,9 @@ function FeaturesSection() {
               <motion.div
                 key={title}
                 variants={cardVariant}
-                className="xai-card bg-black group hover:bg-white/[0.02] transition-colors"
+                className={`xai-card bg-black group hover:bg-white/[0.02] transition-colors ${
+                  i === features.length - 1 ? LAST_CARD_SPAN[features.length % 3] ?? "" : ""
+                }`}
               >
                 {href ? (
                   <Link href={href} className="block p-8">{inner}</Link>
@@ -1832,17 +2181,6 @@ function FeaturesSection() {
               </motion.div>
             );
           })}
-          {/* The 1px "gaps" are this container's own background showing between
-              black cards, so a partial last row would paint its empty cells as a
-              grey block. Filling them with the card colour keeps the grid ending
-              cleanly at any card count. */}
-          {features.length % 3 !== 0 && (
-            <div
-              aria-hidden
-              className="hidden lg:block bg-black"
-              style={{ gridColumn: `span ${3 - (features.length % 3)}` }}
-            />
-          )}
         </motion.div>
       </div>
     </section>
@@ -2193,6 +2531,16 @@ export default function HomePage() {
         <FailureTicker />
         <InstallSection />
         <LandingTraceDemo />
+        {/* The explorer lets you touch one trace; this walks that same trace
+            through all five capabilities as real artifacts. Demonstration
+            before argument. */}
+        <LandingCapabilityTour />
+        {/* Straight off the live explorer, which opens on the featured incident:
+            the reader has just been clicking that trace, so counting what it
+            produced and linking each artifact is a continuation rather than a
+            new claim. It also lands before the benefit sections, so those read
+            as detail on something already shown. */}
+        <DepthSection />
         <StatsSection />
         <BenefitSections />
         <HowItWorksSection />
