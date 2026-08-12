@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { Anthropic } from "@anthropic-ai/sdk";
+import { complete } from "./llm.js";
 import { getTrace } from "./traces.js";
 import { openFixPr, type PrResult } from "./github-pr.js";
 import { collectGitEvidence, type GitEvidence } from "./git-context.js";
@@ -9,10 +9,6 @@ import { collectGitEvidence, type GitEvidence } from "./git-context.js";
 // which is exactly what previously blew Vercel's function timeout.
 import type { VerificationResult } from "./verify.js";
 import { config } from "../config.js";
-
-const IS_DEMO = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
-let anthropic: Anthropic | null = null;
-if (!IS_DEMO) anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
 interface SpanView {
   id: string;
@@ -78,8 +74,13 @@ function heuristicRca(trace: TraceView, span: SpanView): RcaResult {
   };
 }
 
-async function rcaWithLlm(trace: TraceView, span: SpanView, evidence: GitEvidence): Promise<RcaResult | null> {
-  if (!anthropic) return null;
+async function rcaWithLlm(
+  fastify: FastifyInstance,
+  orgId: string,
+  trace: TraceView,
+  span: SpanView,
+  evidence: GitEvidence
+): Promise<{ rca: RcaResult; model: string } | null> {
   const git = span.git ?? null;
 
   // Give the model the actual code and commit — it used to see only a path and
@@ -115,17 +116,24 @@ ${spanBlock}${codeBlock}${commitBlock}
 Root-cause the EARLIEST failure, not the loudest downstream symptom. Base every claim on the evidence above.
 
 Produce ONLY a JSON object: {"summary": short root-cause, "explanation": 2-3 sentences citing the code/commit, "counterfactual": one "if X, this wouldn't have happened" sentence, "confidence": 0..1, "fixTitle": conventional-commit style, "fixDescription": what the fix does, "fixDiff": array of {"kind":"add"|"del"|"ctx"|"meta","text":...} showing a minimal patch}.`;
-  const res = await anthropic.messages.create({
-    model: config.RCA_MODEL,
-    max_tokens: 900,
+  // Routed through the BYOK layer so the workspace's own provider answers.
+  const res = await complete({
+    fastify,
+    orgId,
+    purpose: "rca",
+    maxTokens: 900,
     messages: [{ role: "user", content: prompt }],
   });
-  const text = res.content.find((c) => c.type === "text");
-  if (!text || text.type !== "text") return null;
-  const match = text.text.match(/\{[\s\S]*\}/);
+  if (!res) return null;
+  const match = res.text.match(/\{[\s\S]*\}/);
   if (!match) return null;
-  const parsed = JSON.parse(match[0]) as Partial<RcaResult>;
-  return {
+  let parsed: Partial<RcaResult>;
+  try {
+    parsed = JSON.parse(match[0]) as Partial<RcaResult>;
+  } catch {
+    return null; // prose instead of JSON must not throw
+  }
+  const built: RcaResult = {
     summary: parsed.summary ?? trace.finding?.title ?? "Root cause",
     commit: git?.commit ?? null,
     file: git?.file ?? null,
@@ -138,6 +146,7 @@ Produce ONLY a JSON object: {"summary": short root-cause, "explanation": 2-3 sen
     fixDescription: parsed.fixDescription ?? "",
     fixDiff: Array.isArray(parsed.fixDiff) ? parsed.fixDiff : [],
   };
+  return { rca: built, model: res.model };
 }
 
 /**
@@ -241,12 +250,15 @@ export async function runRca(fastify: FastifyInstance, orgId: string, traceId: s
   );
 
   let rca: RcaResult | null = null;
-  if (anthropic) {
-    try {
-      rca = await rcaWithLlm(trace, span, evidence);
-    } catch (err) {
-      fastify.log.warn({ err, traceId }, "LLM RCA failed — falling back to heuristic");
+  let rcaModel = "heuristic";
+  try {
+    const analyzed = await rcaWithLlm(fastify, orgId, trace, span, evidence);
+    if (analyzed) {
+      rca = analyzed.rca;
+      rcaModel = analyzed.model;
     }
+  } catch (err) {
+    fastify.log.warn({ err, traceId }, "LLM RCA failed — falling back to heuristic");
   }
   if (!rca) rca = heuristicRca(trace, span);
   // hopsUpstream was hardcoded to 1; use the real distance when we resolved it.
@@ -260,7 +272,7 @@ export async function runRca(fastify: FastifyInstance, orgId: string, traceId: s
     ) VALUES (
       ${traceId}, ${findingId}, ${orgId}, 'complete', ${rca.summary}, ${rca.commit}, ${rca.file}, ${rca.line},
       ${rca.explanation}, ${rca.counterfactual}, ${rca.confidence}, ${rca.hopsUpstream},
-      ${rca.fixTitle}, ${rca.fixDescription}, ${fastify.pg.json(rca.fixDiff as unknown as Parameters<typeof fastify.pg.json>[0])}, 'proposed', ${anthropic ? config.RCA_MODEL : "heuristic"}
+      ${rca.fixTitle}, ${rca.fixDescription}, ${fastify.pg.json(rca.fixDiff as unknown as Parameters<typeof fastify.pg.json>[0])}, 'proposed', ${rcaModel}
     )
     RETURNING id
   `) as Array<{ id: string }>;

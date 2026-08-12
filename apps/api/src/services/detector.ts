@@ -1,15 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
-import { Anthropic } from "@anthropic-ai/sdk";
+import { complete } from "./llm.js";
 import { getTrace } from "./traces.js";
 import { notifySlackChannel } from "./slack.js";
 import { sendEmailAlert } from "./email.js";
 import { config } from "../config.js";
-
-const IS_DEMO = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
-let anthropic: Anthropic | null = null;
-if (!IS_DEMO) anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
 export type DetectorType = "hallucination" | "tool_failure" | "intent_drift" | "safety";
 
@@ -68,8 +64,20 @@ function heuristicVerdict(errSpan: SpanView | undefined, warnSpan: SpanView | un
   };
 }
 
-async function judgeWithLlm(trace: TraceView): Promise<Verdict | null> {
-  if (!anthropic) return null;
+/**
+ * Score a trace with the workspace's configured judge model. Goes through the
+ * BYOK layer, so an org running on OpenAI/Gemini/DeepSeek/etc uses ITS key and
+ * model — previously this constructed Anthropic directly and silently ignored
+ * every provider credential the customer had configured.
+ *
+ * Returns null when no provider is reachable, so the caller falls back to the
+ * status-only heuristic.
+ */
+async function judgeWithLlm(
+  fastify: FastifyInstance,
+  orgId: string,
+  trace: TraceView
+): Promise<{ verdict: Verdict; model: string } | null> {
   // Include span I/O so the judge can catch hallucination and intent drift in a
   // trace where every span returned ok — the whole point of an LLM judge.
   const spanLines = trace.spans
@@ -91,16 +99,23 @@ Spans:
 ${spanLines}
 
 Respond with ONLY a JSON object: {"identified": boolean, "detector": one of the four class names, "severity": "critical"|"high"|"medium", "confidence": number between 0 and 1, "title": short string, "summary": one or two sentences citing the evidence, "triggeredSpanId": the id of the span the problem originates in}.`;
-  const res = await anthropic.messages.create({
-    model: config.DETECTOR_MODEL,
-    max_tokens: 600,
+  const res = await complete({
+    fastify,
+    orgId,
+    purpose: "detector",
+    maxTokens: 600,
     messages: [{ role: "user", content: prompt }],
   });
-  const text = res.content.find((c) => c.type === "text");
-  if (!text || text.type !== "text") return null;
-  const match = text.text.match(/\{[\s\S]*\}/);
+  if (!res) return null;
+  const match = res.text.match(/\{[\s\S]*\}/);
   if (!match) return null;
-  const parsed = VerdictSchema.safeParse(JSON.parse(match[0]));
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(match[0]);
+  } catch {
+    return null; // a model that returns prose instead of JSON must not throw
+  }
+  const parsed = VerdictSchema.safeParse(parsedJson);
   if (!parsed.success) return null;
   // The judge can name a span that doesn't exist — pin it to a real one.
   const v = parsed.data;
@@ -108,7 +123,9 @@ Respond with ONLY a JSON object: {"identified": boolean, "detector": one of the 
     v.triggeredSpanId =
       trace.spans.find((s) => s.status === "error")?.id ?? trace.spans[0]?.id ?? "";
   }
-  return v;
+  // Report the model that ACTUALLY judged, not a config default — with BYOK the
+  // org may be running on any provider.
+  return { verdict: v, model: res.model };
 }
 
 /**
@@ -127,17 +144,19 @@ export async function runDetector(fastify: FastifyInstance, orgId: string, trace
   // can still be a hallucination or intent drift — that's exactly the class an
   // LLM judge exists to catch, and gating on error/warn made it unreachable.
   let verdict: Verdict | null = null;
-  if (anthropic) {
-    try {
-      verdict = await judgeWithLlm(trace);
-    } catch (err) {
-      fastify.log.warn({ err, traceId }, "LLM judge failed — falling back to heuristic");
+  let judgeModel = "heuristic";
+  try {
+    const judged = await judgeWithLlm(fastify, orgId, trace);
+    if (judged) {
+      verdict = judged.verdict;
+      judgeModel = judged.model;
     }
+  } catch (err) {
+    fastify.log.warn({ err, traceId }, "LLM judge failed — falling back to heuristic");
   }
-  // Without a model we can only reason from status, so a clean trace stays clean.
+  // Without a reachable provider we can only reason from status, so a clean
+  // trace stays clean.
   if (!verdict) verdict = heuristicVerdict(errSpan, warnSpan);
-
-  const judgeModel = anthropic ? config.DETECTOR_MODEL : "heuristic";
   const detectorRow = verdict
     ? ((await fastify.pg`
         SELECT id FROM detectors WHERE org_id = ${orgId} AND type = ${verdict.detector} AND enabled LIMIT 1

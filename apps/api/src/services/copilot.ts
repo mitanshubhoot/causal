@@ -1,12 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { Anthropic } from "@anthropic-ai/sdk";
+import { complete } from "./llm.js";
 import { getTrace } from "./traces.js";
 import { getRca } from "./rca.js";
 import { config } from "../config.js";
-
-const IS_DEMO = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
-let anthropic: Anthropic | null = null;
-if (!IS_DEMO) anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
 interface SpanView {
   id: string; parentId: string | null; name: string; kind: string; status: string;
@@ -70,33 +66,30 @@ export async function askCopilot(
     INSERT INTO copilot_messages (org_id, trace_id, role, content) VALUES (${orgId}, ${traceId}, 'user', ${question})
   `;
 
-  let answer: string;
-  let model = "deterministic";
-  if (anthropic) {
-    // Take the most RECENT 20 and restore chronological order. Taking the
-    // oldest 20 meant that past message 20 the question just asked fell outside
-    // the window entirely and the model was re-sent stale history.
-    const recent = (await fastify.pg`
-      SELECT role, content FROM copilot_messages
-      WHERE org_id = ${orgId} AND trace_id = ${traceId}
-      ORDER BY created_at DESC LIMIT 20
-    `) as Array<{ role: "user" | "assistant"; content: string }>;
-    const prior = recent.slice().reverse();
+  // Take the most RECENT 20 and restore chronological order. Taking the oldest
+  // 20 meant that past message 20 the question just asked fell outside the
+  // window entirely and the model was re-sent stale history.
+  const recent = (await fastify.pg`
+    SELECT role, content FROM copilot_messages
+    WHERE org_id = ${orgId} AND trace_id = ${traceId}
+    ORDER BY created_at DESC LIMIT 20
+  `) as Array<{ role: "user" | "assistant"; content: string }>;
+  const prior = recent.slice().reverse();
 
-    const res = await anthropic.messages.create({
-      model: config.COPILOT_MODEL,
-      max_tokens: 1200,
-      system: `${SYSTEM}\n\n--- TRACE CONTEXT ---\n${context}`,
-      messages: prior.length
-        ? prior.map((m) => ({ role: m.role, content: m.content }))
-        : [{ role: "user", content: question }],
-    });
-    const text = res.content.find((c) => c.type === "text");
-    answer = text && text.type === "text" ? text.text : "I couldn't produce an answer for that.";
-    model = config.COPILOT_MODEL;
-  } else {
-    answer = deterministicAnswer(question, trace, rca);
-  }
+  // Routed through the BYOK layer so the workspace's own provider and model
+  // answer the question. Returns null when no provider is reachable, and only
+  // then do we fall back to the templated answer.
+  const res = await complete({
+    fastify,
+    orgId,
+    purpose: "copilot",
+    maxTokens: 1200,
+    system: `${SYSTEM}\n\n--- TRACE CONTEXT ---\n${context}`,
+    messages: prior.length ? prior : [{ role: "user", content: question }],
+  });
+
+  const answer = res?.text?.trim() ? res.text : deterministicAnswer(question, trace, rca);
+  const model = res?.model ?? "deterministic";
 
   await fastify.pg`
     INSERT INTO copilot_messages (org_id, trace_id, role, content, model)
@@ -106,7 +99,7 @@ export async function askCopilot(
   // `grounded` means an LLM reasoned over the trace context. The deterministic
   // fallback still reads real trace data, but it is templated, not reasoned —
   // reporting it as grounded overstated what happened.
-  return { answer, model, grounded: anthropic !== null };
+  return { answer, model, grounded: res !== null };
 }
 
 /** No-API-key fallback: still answers from real trace data, just without an LLM. */

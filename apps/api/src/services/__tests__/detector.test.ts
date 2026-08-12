@@ -12,20 +12,22 @@ import { createFastifyStub, type PgStub, type Row } from "./pg-stub.js";
 const judge = vi.hoisted(() => ({
   /** Raw assistant text the stubbed judge replies with. */
   reply: "",
-  /** When set, `messages.create` rejects with it. */
+  /** When set, the completion rejects with it. */
   fail: null as Error | null,
   calls: 0,
 }));
 
-vi.mock("@anthropic-ai/sdk", () => ({
-  Anthropic: class {
-    messages = {
-      create: async (): Promise<{ content: Array<{ type: string; text: string }> }> => {
-        judge.calls++;
-        if (judge.fail) throw judge.fail;
-        return { content: [{ type: "text", text: judge.reply }] };
-      },
-    };
+/**
+ * Mock the BYOK layer, not the Anthropic SDK. The detector now resolves a
+ * provider per workspace through `complete()`, so that is the real seam — and
+ * mocking it keeps these tests true whichever provider an org runs on.
+ * `complete()` returning null is how "no provider reachable" is signalled.
+ */
+vi.mock("../llm.js", () => ({
+  complete: async (): Promise<{ text: string; model: string; provider: string; tokensIn: number; tokensOut: number } | null> => {
+    judge.calls++;
+    if (judge.fail) throw judge.fail;
+    return { text: judge.reply, model: "test-judge-model", provider: "anthropic", tokensIn: 0, tokensOut: 0 };
   },
 }));
 
