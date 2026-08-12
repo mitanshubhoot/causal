@@ -1428,6 +1428,7 @@ function FeaturesSection() {
     { icon: Code2, title: "Verified fix PRs", description: "Causal writes the fix and opens a GitHub pull request — diff, description, and a passing causal-replay check that proves the incident is resolved." },
     { icon: Zap, title: "Causal Copilot", description: "Ask any trace a question — why did this fail, what's the fix, where did the cost go. Answers grounded in your spans and git history." },
     { icon: Search, title: "Provenance graph", description: "The six-layer chain — intent to spec to reasoning to code to execution to incident — as a navigable root-cause map for every failure." },
+    { icon: FileText, title: "Token & cost accounting", description: "Tokens and spend recorded per span and rolled up through every parent, so you can see exactly which agent step, retry, or sub-agent burned the budget." },
     { icon: Webhook, title: "Built for your stack", description: "OpenTelemetry-based SDKs with adapters for LangGraph, CrewAI, LlamaIndex, OpenAI Agents, Vercel AI, and Claude Agent SDK. GitHub, Slack, and email included." },
   ];
 
@@ -1454,7 +1455,7 @@ function FeaturesSection() {
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: "-60px" }}
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[1px] bg-white/[0.06]"
+          className="grid grid-cols-1 lg:grid-cols-3 gap-[1px] bg-white/[0.06]"
         >
           {features.map(({ icon: Icon, title, description }) => (
             <motion.div key={title} variants={cardVariant} className="xai-card bg-black p-8">
