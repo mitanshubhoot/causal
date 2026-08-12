@@ -199,31 +199,10 @@ ${demo.fixPr ? `${demo.fixPr.description}\n\n→ **PR #${demo.fixPr.number}** (\
           </div>
         )}
 
-        {/* Actions — only for incidents (traces with a finding) */}
-        {demo.finding && (
-          <div className="flex flex-wrap gap-2 pt-1">
-            {demo.fixPr && (
-              <button
-                onClick={onOpenFixPr}
-                className="inline-flex items-center gap-1.5 font-mono text-[11px] text-emerald-300 border border-emerald-500/25 bg-emerald-500/[0.06] rounded-md px-2.5 py-1.5 hover:bg-emerald-500/10 transition-colors"
-              >
-                <GitPullRequest className="w-3 h-3" /> Open fix PR #{demo.fixPr.number}
-              </button>
-            )}
-            <button
-              onClick={onOpenGraph}
-              className="inline-flex items-center gap-1.5 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2.5 py-1.5 hover:border-white/20 transition-colors"
-            >
-              <Waypoints className="w-3 h-3" /> Causal graph
-            </button>
-            <Link
-              href={`/incidents/${demo.incidentId}/postmortem`}
-              className="inline-flex items-center gap-1.5 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2.5 py-1.5 hover:border-white/20 transition-colors"
-            >
-              <FileText className="w-3 h-3" /> Post-mortem
-            </Link>
-          </div>
-        )}
+        {/* Fix PR / causal graph / post-mortem now live in the pinned
+            TraceActions bar under the trace header — they belong to the trace,
+            not to a message, and here they scrolled out of view as the
+            conversation grew. */}
 
         {/* Suggestions (only before the user asks anything) */}
         {msgs.length === 0 && (

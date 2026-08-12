@@ -20,6 +20,7 @@ import { Copilot } from "@/components/product/Copilot";
 import { FixPrView } from "@/components/product/panels";
 import { DetectorsView, DashboardView } from "@/components/product/views";
 import { EvalsView } from "@/components/product/EvalsView";
+import { TraceActions } from "@/components/product/TraceActions";
 import { CommandPalette, type Command } from "@/components/product/CommandPalette";
 import { SeverityChip, STATUS_META, CopyButton, DETECTOR_LABEL } from "@/components/product/ui";
 
@@ -346,6 +347,14 @@ export default function IncidentPage({ params }: PageProps) {
               <span className="hidden lg:inline text-zinc-700">·</span>
               <span className="hidden lg:inline truncate">{demo.model}</span>
             </div>
+            {/* Trace-level actions, always visible — they used to be buried in
+                the Copilot conversation and scrolled away as the chat grew. */}
+            <TraceActions
+              demo={demo}
+              onOpenFixPr={() => setModal("fixpr")}
+              onOpenGraph={() => setModal("graph")}
+              onPromote={() => setView("evals")}
+            />
             {demo.finding && (
               <button
                 onClick={() => { setTreeMode("trace"); setSelectedSpanId(demo.finding!.triggeredSpanId); }}
