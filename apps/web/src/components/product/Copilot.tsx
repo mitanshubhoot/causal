@@ -1,12 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
 import type { ObservabilityDemo } from "@/lib/mock-observability";
 import { askCopilot, LIVE_TRACES } from "@/lib/traces-api";
 import { DETECTOR_LABEL, fmtDuration, fmtTokens } from "./ui";
-import { Sparkles, GitPullRequest, Waypoints, FileText, ArrowUp } from "lucide-react";
+import { Sparkles, ArrowUp, X } from "lucide-react";
 
 // Dark, compact markdown styling for the copilot panel.
 const MD: Components = {
@@ -68,12 +67,11 @@ ${rc ? "The retry spans after the failure are pure waste — fixing the root cau
 
 export function Copilot({
   demo,
-  onOpenFixPr,
-  onOpenGraph,
+  onClose,
 }: {
   demo: ObservabilityDemo;
-  onOpenFixPr: () => void;
-  onOpenGraph: () => void;
+  /** Present when the Copilot is rendered as a drawer (below 2xl). */
+  onClose?: () => void;
 }) {
   const intro = useMemo<Msg>(() => {
     if (!demo.finding || !demo.rootCause) {
@@ -164,6 +162,15 @@ ${demo.fixPr ? `${demo.fixPr.description}\n\n→ **PR #${demo.fixPr.number}** (\
       <div className="flex items-center gap-2 px-4 h-9 border-b border-white/[0.06] flex-shrink-0">
         <Sparkles className="w-3.5 h-3.5 text-indigo-300/80" strokeWidth={1.75} />
         <span className="font-mono text-[11px] tracking-[0.1em] uppercase text-zinc-400">Causal Copilot</span>
+        {onClose && (
+          <button
+            onClick={onClose}
+            title="Close Copilot"
+            className="ml-auto text-zinc-500 hover:text-zinc-200 transition-colors 2xl:hidden"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Conversation */}

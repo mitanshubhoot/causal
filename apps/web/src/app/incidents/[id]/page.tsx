@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Activity, Eye, LayoutGrid, Github, Search, ChevronDown, X, Waypoints, ScanSearch,
-  ArrowLeft, ListTree, GanttChart, ShieldAlert, PanelLeft, PanelRight, Database,
+  ArrowLeft, ListTree, GanttChart, ShieldAlert, PanelLeft, Database, Sparkles,
 } from "lucide-react";
 import { ProvenanceExplorer } from "@/components/ProvenanceExplorer";
 import { getMockTrace } from "@/lib/mock-data";
@@ -103,7 +103,13 @@ export default function IncidentPage({ params }: PageProps) {
   const [wsOpen, setWsOpen] = useState(false);
   // Pane visibility — lets the trace tree take the full width when needed.
   const [showList, setShowList] = useState(true);
-  const [showCopilot, setShowCopilot] = useState(true);
+  // Only default the Copilot open where it fits inline (2xl). On narrower
+  // screens it opens as a drawer, on demand — but the toggle is ALWAYS
+  // available, so it can never become unreachable.
+  const [showCopilot, setShowCopilot] = useState(false);
+  useEffect(() => {
+    setShowCopilot(window.matchMedia("(min-width: 1536px)").matches);
+  }, []);
 
   const live = useLiveExplorer(activeId);
   const demo = live?.demo ?? getObservabilityDemo(activeId);
@@ -332,12 +338,19 @@ export default function IncidentPage({ params }: PageProps) {
                   </button>
                 ))}
               </div>
+              {/* ALWAYS visible — gating this behind the same breakpoint as the
+                  pane made the Copilot unreachable on any screen under 1536px. */}
               <button
                 onClick={() => setShowCopilot((v) => !v)}
-                title={showCopilot ? "Hide Copilot" : "Show Copilot"}
-                className={`hidden 2xl:block flex-shrink-0 transition-colors ${showCopilot ? "text-zinc-500 hover:text-zinc-300" : "text-indigo-300/80"}`}
+                title={showCopilot ? "Hide Copilot" : "Ask Causal Copilot about this trace"}
+                className={`inline-flex items-center gap-1.5 flex-shrink-0 font-mono text-[11px] rounded-md border px-2 py-1 transition-colors ${
+                  showCopilot
+                    ? "text-zinc-400 border-white/10 hover:border-white/25"
+                    : "text-indigo-300 border-indigo-400/30 bg-indigo-500/[0.08] hover:bg-indigo-500/[0.15]"
+                }`}
               >
-                <PanelRight className="w-3.5 h-3.5" />
+                <Sparkles className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Copilot</span>
               </button>
             </div>
             <div className="flex items-center gap-2 px-3 h-8 border-b border-white/[0.04] font-mono text-[11px] text-zinc-500 flex-shrink-0 overflow-hidden whitespace-nowrap">
@@ -386,9 +399,20 @@ export default function IncidentPage({ params }: PageProps) {
           </section>
 
           {/* ── Copilot ── */}
-          <section className={`${showCopilot ? "hidden 2xl:flex" : "hidden"} w-[340px] flex-col flex-shrink-0`}>
-            <Copilot demo={demo} onOpenFixPr={() => setModal("fixpr")} onOpenGraph={() => setModal("graph")} />
-          </section>
+          {/* Inline pane at 2xl where there is room; a right-hand drawer below
+              that, so the Copilot is reachable at every width. */}
+          {showCopilot && (
+            <>
+              <div
+                onClick={() => setShowCopilot(false)}
+                className="fixed inset-0 z-30 bg-black/50 2xl:hidden"
+                aria-hidden
+              />
+              <section className="fixed inset-y-0 right-0 z-40 w-[min(380px,90vw)] flex flex-col border-l border-white/10 bg-[#0c0c0e] shadow-2xl 2xl:static 2xl:z-auto 2xl:w-[340px] 2xl:shadow-none 2xl:border-l-0 flex-shrink-0">
+                <Copilot demo={demo} onClose={() => setShowCopilot(false)} />
+              </section>
+            </>
+          )}
         </>
       ) : view === "detectors" ? (
         <DetectorsView onOpen={openIncident} />
