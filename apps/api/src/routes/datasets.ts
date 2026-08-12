@@ -27,13 +27,41 @@ const nonEmptyJson = (v: unknown): boolean => {
   return true;
 };
 
+/**
+ * An assertion is the checkable half of a golden case. The kind is a closed set
+ * because the harness dispatches on it — an unknown kind would be stored, shown
+ * with a tick, and never actually evaluated.
+ */
+const AssertionSchema = z.object({
+  id: z.string().min(1).max(64).optional(),
+  kind: z.enum([
+    "must_not_raise", "must_contain", "must_not_contain", "must_call_tool",
+    "must_confirm", "latency_under_ms", "cost_under_usd", "no_unsourced_number",
+  ]),
+  description: z.string().min(1).max(500),
+  target: z.string().min(1).max(500),
+});
+
 const AddItemSchema = z.object({
   input: z.unknown().refine(nonEmptyJson, "input is required"),
   expected: z.unknown().optional(),
   spanSignature: z.string().max(300).nullable().optional(),
+  title: z.string().max(300).nullable().optional(),
+  assertions: z.array(AssertionSchema).max(32).optional(),
+  tags: z.array(z.string().max(40)).max(20).optional(),
+  severity: z.enum(["critical", "high", "medium"]).optional(),
+  difficulty: z.enum(["regression", "edge-case", "adversarial"]).optional(),
   notes: z.string().max(2000).nullable().optional(),
   traceId: z.string().nullable().optional(),
   findingId: z.string().uuid().nullable().optional(),
+});
+
+const RunEvalSchema = z.object({
+  name: z.string().max(200).nullable().optional(),
+  // What this run gates. Without a release two runs can be ordered but not
+  // compared, and a per-case history has nothing to key on.
+  release: z.string().max(120).nullable().optional(),
+  commit: z.string().max(40).nullable().optional(),
 });
 
 // datasets/dataset_items/eval_runs ids are all uuid columns. Feeding Postgres a
@@ -110,15 +138,19 @@ const datasetsPlugin: FastifyPluginAsync = async (fastify) => {
   );
 
   // ── Eval runs ─────────────────────────────────────────────────────
-  fastify.post<{ Params: { id: string }; Body: { name?: string | null } }>(
+  fastify.post<{ Params: { id: string }; Body: unknown }>(
     "/datasets/:id/evals",
     async (request, reply) => {
       const { orgId, role } = request.authUser;
       if (role === "viewer") return reply.forbidden("Read-only credentials cannot start eval runs");
       if (!isUuid(request.params.id)) return reply.notFound("Dataset not found");
+      const parsed = RunEvalSchema.safeParse(request.body ?? {});
+      if (!parsed.success) return reply.badRequest(parsed.error.issues[0]?.message ?? "invalid body");
       const run = await runEval(fastify, orgId, {
         datasetId: request.params.id,
-        name: (request.body ?? {}).name ?? null,
+        name: parsed.data.name ?? null,
+        release: parsed.data.release ?? null,
+        commit: parsed.data.commit ?? null,
       });
       if (!run) return reply.notFound("Dataset not found");
       return reply.code(201).send(run);

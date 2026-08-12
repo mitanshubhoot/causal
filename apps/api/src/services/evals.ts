@@ -112,7 +112,14 @@ export interface EvalResultView {
   score: number;
   actual: Record<string, unknown> | null;
   reason: string | null;
+  /** Which named expectation held, and on what evidence. */
+  assertionResults: AssertionResult[];
+  latencyMs: number | null;
+  costUsd: number;
+  /** Movement against the previous complete run: fixed | regressed | unchanged. */
+  delta: "fixed" | "regressed" | "unchanged";
   spanSignature?: string | null;
+  title?: string | null;
   notes?: string | null;
   traceId?: string | null;
   findingId?: string | null;
@@ -126,6 +133,11 @@ export interface EvalRunView {
   name: string | null;
   status: string;
   model: string | null;
+  judgeModel: string | null;
+  /** The release this run gated — what makes two runs comparable. */
+  release: string | null;
+  commit: string | null;
+  costUsd: number;
   total: number;
   passed: number;
   failed: number;
@@ -270,6 +282,78 @@ function deterministicJudgement(ev: ItemEvidence, spanName: string | null): Judg
   };
 }
 
+// ── Assertions ───────────────────────────────────────────────────────
+
+export interface AssertionResult {
+  id: string;
+  passed: boolean;
+  detail: string;
+}
+
+/**
+ * Check each assertion against the production evidence we collected.
+ *
+ * This is deliberately conservative. Some assertion kinds (`must_contain`,
+ * `no_unsourced_number`) are claims about the agent's OUTPUT TEXT, which this
+ * evaluator does not re-generate — it reasons over spans that already ran. For
+ * those we check what the spans can actually support and say so in the detail,
+ * rather than inventing a verdict. An assertion we cannot check is reported as
+ * passing-with-an-explanation, never as a silent pass: a green tick with no
+ * detail behind it is exactly the kind of claim this product exists to kill.
+ */
+function evaluateAssertions(item: DatasetItem, ev: ItemEvidence): AssertionResult[] {
+  const spanName = failingSpanName(item);
+  const target = (a: { target: string }) => clip(a.target, 160) ?? a.target;
+
+  return item.assertions.map((a): AssertionResult => {
+    switch (a.kind) {
+      case "must_not_raise": {
+        if (ev.recurred) {
+          const hit = ev.recurrences[0]!;
+          return {
+            id: a.id,
+            passed: false,
+            detail: `\`${ev.signature}\` raised again in trace ${hit.traceId}${hit.error ? ` — ${clip(hit.error, 160)}` : ""}`,
+          };
+        }
+        if (ev.exercised > 0) {
+          return { id: a.id, passed: true, detail: `${ev.exercised} production run(s) of \`${spanName ?? "this step"}\`, 0 raised` };
+        }
+        return { id: a.id, passed: true, detail: `unproven: no traffic has exercised \`${spanName ?? "this path"}\` since promotion` };
+      }
+
+      case "must_call_tool": {
+        if (ev.exercised > 0) {
+          return { id: a.id, passed: true, detail: `\`${spanName ?? target(a)}\` present in ${ev.exercised} run(s)` };
+        }
+        return { id: a.id, passed: true, detail: `unproven: \`${target(a)}\` not seen in the evidence window` };
+      }
+
+      case "latency_under_ms": {
+        // The budget is the numeric part of the target, wherever it sits.
+        const budget = Number(a.target.match(/(\d[\d_]*)\s*(?:ms)?\s*$/)?.[1]?.replace(/_/g, ""));
+        if (!Number.isFinite(budget)) {
+          return { id: a.id, passed: true, detail: `unchecked: no numeric budget in \`${target(a)}\`` };
+        }
+        return { id: a.id, passed: true, detail: `unproven: span durations are not part of the recurrence evidence (budget ${budget}ms)` };
+      }
+
+      case "must_not_contain":
+      case "must_contain":
+      case "must_confirm":
+      case "cost_under_usd":
+      case "no_unsourced_number":
+        return {
+          id: a.id,
+          passed: !ev.recurred,
+          detail: ev.recurred
+            ? `not evaluated on its own terms — the case regressed on signature \`${ev.signature}\`, so the run failed before this could hold`
+            : `unproven: \`${a.kind}\` is a claim about output text, which the signature evaluator does not re-generate`,
+        };
+    }
+  });
+}
+
 function buildJudgePrompt(item: DatasetItem, ev: ItemEvidence): string {
   const input = item.input;
   const expected = item.expected;
@@ -341,6 +425,39 @@ interface PendingResult {
   score: number;
   actual: ReturnType<typeof json>;
   reason: string;
+  assertion_results: ReturnType<typeof json>;
+  latency_ms: number;
+  cost_usd: number;
+  delta: "fixed" | "regressed" | "unchanged";
+}
+
+/**
+ * How each case did in the PREVIOUS run of this dataset, so a verdict can be
+ * reported as movement rather than as a bare state.
+ *
+ * The previous run is the newest COMPLETE one — a failed or still-running run
+ * is not a baseline, and comparing against it would report phantom regressions.
+ */
+async function previousVerdicts(
+  fastify: FastifyInstance,
+  orgId: string,
+  datasetId: string,
+  currentRunId: string
+): Promise<Map<string, boolean>> {
+  const rows = (await fastify.pg`
+    SELECT res.dataset_item_id, res.passed
+    FROM eval_results res
+    WHERE res.eval_run_id = (
+      SELECT id FROM eval_runs
+      WHERE dataset_id = ${datasetId} AND org_id = ${orgId}
+        AND status = 'complete' AND id <> ${currentRunId}
+      ORDER BY started_at DESC
+      LIMIT 1
+    )
+      AND res.org_id = ${orgId}
+      AND res.dataset_item_id IS NOT NULL
+  `) as Array<{ dataset_item_id: string; passed: boolean }>;
+  return new Map(rows.map((r) => [r.dataset_item_id, r.passed]));
 }
 
 /**
@@ -351,7 +468,7 @@ interface PendingResult {
 export async function runEval(
   fastify: FastifyInstance,
   orgId: string,
-  opts: { datasetId: string; name?: string | null }
+  opts: { datasetId: string; name?: string | null; release?: string | null; commit?: string | null }
 ): Promise<EvalRunView | null> {
   const sql = fastify.pg;
   const dataset = await getDataset(fastify, orgId, opts.datasetId);
@@ -361,17 +478,23 @@ export async function runEval(
   const model = anthropic ? JUDGE_MODEL : "deterministic";
   const name = (opts.name ?? `${dataset.name} — ${new Date().toISOString().slice(0, 16).replace("T", " ")}`).slice(0, 200);
 
+  const judgeModel = anthropic ? JUDGE_MODEL : "deterministic";
+  const release = clip(opts.release ?? null, 120);
+  const commit = clip(opts.commit ?? null, 40);
+
   const runRows = (await sql`
-    INSERT INTO eval_runs (org_id, dataset_id, name, status, model, total)
-    VALUES (${orgId}, ${dataset.id}, ${name}, 'running', ${model}, ${items.length})
+    INSERT INTO eval_runs (org_id, dataset_id, name, status, model, judge_model, release, commit_sha, total)
+    VALUES (${orgId}, ${dataset.id}, ${name}, 'running', ${model}, ${judgeModel}, ${release}, ${commit}, ${items.length})
     RETURNING id, started_at
   `) as Array<{ id: string; started_at: Date }>;
   const run = runRows[0]!;
 
   try {
     const evidence = items.length ? await collectEvidence(fastify, orgId, items) : null;
+    const before = await previousVerdicts(fastify, orgId, dataset.id, run.id);
 
     const judgeOne = async (item: DatasetItem): Promise<PendingResult> => {
+      const startedAt = Date.now();
       const itemEv: ItemEvidence = evidence
         ? evidenceForItem(item, evidence)
         : { signature: item.spanSignature, discriminating: false, recurred: false, recurrences: [], exercised: 0, latest: null };
@@ -397,12 +520,38 @@ export async function runEval(
         };
       }
 
+      // An assertion that fails is a failure, whatever the judge concluded:
+      // the case named an expectation and the evidence contradicts it.
+      const assertions = evaluateAssertions(item, itemEv);
+      const brokenAssertion = assertions.find((a) => !a.passed);
+      if (brokenAssertion && verdict.passed) {
+        verdict = {
+          passed: false,
+          score: 0,
+          reason: `Assertion \`${brokenAssertion.id}\` failed: ${brokenAssertion.detail}. Judge note: ${verdict.reason}`.slice(0, 2000),
+        };
+      }
+
+      // First-ever verdict for a case is `unchanged` — there is nothing to
+      // compare against, and calling a new failure a regression would be a lie.
+      const prior = before.get(item.id);
+      const delta =
+        prior === undefined || prior === verdict.passed
+          ? "unchanged"
+          : verdict.passed
+            ? "fixed"
+            : "regressed";
+
       return {
         eval_run_id: run.id,
         org_id: orgId,
         dataset_item_id: item.id,
         passed: verdict.passed,
         score: Number(verdict.score.toFixed(3)),
+        assertion_results: json(sql, assertions),
+        latency_ms: Date.now() - startedAt,
+        cost_usd: 0,
+        delta,
         actual: json(sql, {
           signature: itemEv.signature,
           discriminating: itemEv.discriminating,
@@ -435,7 +584,11 @@ export async function runEval(
 
     if (results.length > 0) {
       await sql`
-        INSERT INTO eval_results ${sql(results, "eval_run_id", "org_id", "dataset_item_id", "passed", "score", "actual", "reason")}
+        INSERT INTO eval_results ${sql(
+          results,
+          "eval_run_id", "org_id", "dataset_item_id", "passed", "score",
+          "actual", "reason", "assertion_results", "latency_ms", "cost_usd", "delta"
+        )}
       `;
     }
 
@@ -464,6 +617,10 @@ export async function runEval(
       name,
       status: "complete",
       model,
+      judgeModel,
+      release,
+      commit,
+      costUsd: 0,
       total: results.length,
       passed,
       failed,
@@ -485,6 +642,10 @@ export async function runEval(
       name,
       status: "failed",
       model,
+      judgeModel,
+      release,
+      commit,
+      costUsd: 0,
       total: items.length,
       passed: 0,
       failed: 0,
@@ -501,7 +662,8 @@ export async function runEval(
 /** One eval run with every judged item. */
 export async function getEvalRun(fastify: FastifyInstance, orgId: string, id: string): Promise<EvalRunView | null> {
   const rows = (await fastify.pg`
-    SELECT r.id, r.dataset_id, r.name, r.status, r.model, r.total, r.passed, r.failed, r.score,
+    SELECT r.id, r.dataset_id, r.name, r.status, r.model, r.judge_model, r.release, r.commit_sha,
+           r.cost_usd, r.total, r.passed, r.failed, r.score,
            r.started_at, r.finished_at, d.name AS dataset_name
     FROM eval_runs r
     LEFT JOIN datasets d ON d.id = r.dataset_id AND d.org_id = r.org_id
@@ -513,7 +675,8 @@ export async function getEvalRun(fastify: FastifyInstance, orgId: string, id: st
 
   const results = (await fastify.pg`
     SELECT e.id, e.dataset_item_id, e.passed, e.score, e.actual, e.reason, e.created_at,
-           i.span_signature, i.notes, i.trace_id, i.finding_id
+           e.assertion_results, e.latency_ms, e.cost_usd, e.delta,
+           i.span_signature, i.title, i.notes, i.trace_id, i.finding_id
     FROM eval_results e
     LEFT JOIN dataset_items i ON i.id = e.dataset_item_id AND i.org_id = e.org_id
     WHERE e.eval_run_id = ${id} AND e.org_id = ${orgId}
@@ -528,6 +691,10 @@ export async function getEvalRun(fastify: FastifyInstance, orgId: string, id: st
     name: (r["name"] as string | null) ?? null,
     status: r["status"] as string,
     model: (r["model"] as string | null) ?? null,
+    judgeModel: (r["judge_model"] as string | null) ?? null,
+    release: (r["release"] as string | null) ?? null,
+    commit: (r["commit_sha"] as string | null) ?? null,
+    costUsd: Number(r["cost_usd"] ?? 0),
     total: Number(r["total"]),
     passed: Number(r["passed"]),
     failed: Number(r["failed"]),
@@ -541,7 +708,12 @@ export async function getEvalRun(fastify: FastifyInstance, orgId: string, id: st
       score: Number(e["score"]),
       actual: (e["actual"] as Record<string, unknown> | null) ?? null,
       reason: (e["reason"] as string | null) ?? null,
+      assertionResults: Array.isArray(e["assertion_results"]) ? (e["assertion_results"] as AssertionResult[]) : [],
+      latencyMs: e["latency_ms"] === null || e["latency_ms"] === undefined ? null : Number(e["latency_ms"]),
+      costUsd: Number(e["cost_usd"] ?? 0),
+      delta: (e["delta"] as EvalResultView["delta"]) ?? "unchanged",
       spanSignature: (e["span_signature"] as string | null) ?? null,
+      title: (e["title"] as string | null) ?? null,
       notes: (e["notes"] as string | null) ?? null,
       traceId: (e["trace_id"] as string | null) ?? null,
       findingId: (e["finding_id"] as string | null) ?? null,
@@ -560,7 +732,8 @@ export async function listEvalRuns(
   const capped = Math.min(Math.max(limit, 1), 500);
   const rows = (datasetId
     ? await fastify.pg`
-        SELECT r.id, r.dataset_id, r.name, r.status, r.model, r.total, r.passed, r.failed, r.score,
+        SELECT r.id, r.dataset_id, r.name, r.status, r.model, r.judge_model, r.release, r.commit_sha,
+               r.cost_usd, r.total, r.passed, r.failed, r.score,
                r.started_at, r.finished_at, d.name AS dataset_name
         FROM eval_runs r
         LEFT JOIN datasets d ON d.id = r.dataset_id AND d.org_id = r.org_id
@@ -569,7 +742,8 @@ export async function listEvalRuns(
         LIMIT ${capped}
       `
     : await fastify.pg`
-        SELECT r.id, r.dataset_id, r.name, r.status, r.model, r.total, r.passed, r.failed, r.score,
+        SELECT r.id, r.dataset_id, r.name, r.status, r.model, r.judge_model, r.release, r.commit_sha,
+               r.cost_usd, r.total, r.passed, r.failed, r.score,
                r.started_at, r.finished_at, d.name AS dataset_name
         FROM eval_runs r
         LEFT JOIN datasets d ON d.id = r.dataset_id AND d.org_id = r.org_id
@@ -585,6 +759,10 @@ export async function listEvalRuns(
     name: (r["name"] as string | null) ?? null,
     status: r["status"] as string,
     model: (r["model"] as string | null) ?? null,
+    judgeModel: (r["judge_model"] as string | null) ?? null,
+    release: (r["release"] as string | null) ?? null,
+    commit: (r["commit_sha"] as string | null) ?? null,
+    costUsd: Number(r["cost_usd"] ?? 0),
     total: Number(r["total"]),
     passed: Number(r["passed"]),
     failed: Number(r["failed"]),

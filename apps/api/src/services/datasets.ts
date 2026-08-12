@@ -30,14 +30,42 @@ interface TraceView {
   spans: SpanView[];
 }
 
+/**
+ * One assertion on a golden case — a named, machine-checkable expectation.
+ *
+ * `expected` prose says what "correct" means to a human; assertions are what
+ * the harness can actually check, and what a failing verdict points at. A case
+ * with no assertions still runs: it falls back to the signature-recurrence
+ * check alone.
+ */
+export interface CaseAssertion {
+  id: string;
+  kind:
+    | "must_not_raise"
+    | "must_contain"
+    | "must_not_contain"
+    | "must_call_tool"
+    | "must_confirm"
+    | "latency_under_ms"
+    | "cost_under_usd"
+    | "no_unsourced_number";
+  description: string;
+  target: string;
+}
+
 export interface DatasetItem {
   id: string;
   datasetId: string;
   traceId: string | null;
   findingId: string | null;
+  title: string | null;
   input: Record<string, unknown>;
   expected: Record<string, unknown>;
   spanSignature: string | null;
+  assertions: CaseAssertion[];
+  tags: string[];
+  severity: "critical" | "high" | "medium";
+  difficulty: "regression" | "edge-case" | "adversarial";
   notes: string | null;
   createdAt: unknown;
 }
@@ -143,9 +171,16 @@ function mapItem(r: Record<string, unknown>): DatasetItem {
     datasetId: r["dataset_id"] as string,
     traceId: (r["trace_id"] as string | null) ?? null,
     findingId: (r["finding_id"] as string | null) ?? null,
+    title: (r["title"] as string | null) ?? null,
     input: (r["input"] as Record<string, unknown>) ?? {},
     expected: (r["expected"] as Record<string, unknown>) ?? {},
     spanSignature: (r["span_signature"] as string | null) ?? null,
+    // Columns added by 010. Coalesced here rather than assumed, so a row
+    // written before the migration still maps cleanly.
+    assertions: Array.isArray(r["assertions"]) ? (r["assertions"] as CaseAssertion[]) : [],
+    tags: Array.isArray(r["tags"]) ? (r["tags"] as string[]) : [],
+    severity: (r["severity"] as DatasetItem["severity"]) ?? "medium",
+    difficulty: (r["difficulty"] as DatasetItem["difficulty"]) ?? "regression",
     notes: (r["notes"] as string | null) ?? null,
     createdAt: r["created_at"],
   };
@@ -212,7 +247,8 @@ export async function getDataset(fastify: FastifyInstance, orgId: string, id: st
   if (!d) return null;
 
   const items = (await fastify.pg`
-    SELECT id, dataset_id, trace_id, finding_id, input, expected, span_signature, notes, created_at
+    SELECT id, dataset_id, trace_id, finding_id, title, input, expected, span_signature,
+           assertions, tags, severity, difficulty, notes, created_at
     FROM dataset_items
     WHERE dataset_id = ${id} AND org_id = ${orgId}
     ORDER BY created_at DESC
@@ -265,9 +301,46 @@ export interface AddItemInput {
   input: unknown;
   expected?: unknown;
   spanSignature?: string | null;
+  title?: string | null;
+  assertions?: unknown;
+  tags?: string[] | null;
+  severity?: DatasetItem["severity"] | null;
+  difficulty?: DatasetItem["difficulty"] | null;
   notes?: string | null;
   traceId?: string | null;
   findingId?: string | null;
+}
+
+const ASSERTION_KINDS: ReadonlySet<string> = new Set([
+  "must_not_raise", "must_contain", "must_not_contain", "must_call_tool",
+  "must_confirm", "latency_under_ms", "cost_under_usd", "no_unsourced_number",
+]);
+
+/**
+ * Coerce caller-supplied assertions into the stored shape.
+ *
+ * Silently DROPPING a malformed assertion would be the worst outcome: the case
+ * would look checked while an expectation quietly went unenforced. Anything
+ * unrecognisable is rejected by the route's schema before it reaches here; this
+ * is the last line of defence for shape, ids and bounds.
+ */
+function normalizeAssertions(value: unknown): CaseAssertion[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 32).flatMap((raw, i): CaseAssertion[] => {
+    if (typeof raw !== "object" || raw === null) return [];
+    const a = raw as Record<string, unknown>;
+    const kind = String(a["kind"] ?? "");
+    if (!ASSERTION_KINDS.has(kind)) return [];
+    const description = clip(String(a["description"] ?? ""), 500);
+    const target = clip(String(a["target"] ?? ""), 500);
+    if (!description || !target) return [];
+    return [{
+      id: clip(String(a["id"] ?? ""), 64) || `a${i + 1}`,
+      kind: kind as CaseAssertion["kind"],
+      description,
+      target,
+    }];
+  });
 }
 
 /** Add a golden case by hand (the promote path below is the usual one). */
@@ -280,13 +353,22 @@ export async function addItem(
   if (!(await datasetExists(fastify, orgId, datasetId))) return null;
   const sql = fastify.pg;
   const rows = (await sql`
-    INSERT INTO dataset_items (dataset_id, org_id, trace_id, finding_id, input, expected, span_signature, notes)
+    INSERT INTO dataset_items (
+      dataset_id, org_id, trace_id, finding_id, title, input, expected, span_signature,
+      assertions, tags, severity, difficulty, notes
+    )
     VALUES (
       ${datasetId}, ${orgId}, ${item.traceId ?? null}, ${item.findingId ?? null},
+      ${clip(item.title ?? null, 300)},
       ${json(sql, item.input ?? {})}, ${json(sql, item.expected ?? {})},
-      ${clip(item.spanSignature ?? null, 300)}, ${clip(item.notes ?? null, 2000)}
+      ${clip(item.spanSignature ?? null, 300)},
+      ${json(sql, normalizeAssertions(item.assertions))},
+      ${(item.tags ?? []).slice(0, 20).map((t) => String(t).slice(0, 40))},
+      ${item.severity ?? "medium"}, ${item.difficulty ?? "regression"},
+      ${clip(item.notes ?? null, 2000)}
     )
-    RETURNING id, dataset_id, trace_id, finding_id, input, expected, span_signature, notes, created_at
+    RETURNING id, dataset_id, trace_id, finding_id, title, input, expected, span_signature,
+              assertions, tags, severity, difficulty, notes, created_at
   `) as Array<Record<string, unknown>>;
   return rows[0] ? mapItem(rows[0]) : null;
 }
