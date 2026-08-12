@@ -93,6 +93,27 @@ export function registerApp(app: FastifyInstance): void {
     const limiter = request.url.startsWith("/api/v1/webhooks") ? webhookRateLimiter : apiRateLimiter;
     await limiter(request, reply);
   });
+
+  // Enforce the viewer role. `authUser.role` was set but never read anywhere,
+  // so the PUBLIC demo key could trigger RCA (spending Anthropic tokens and
+  // attempting real GitHub PRs against a customer repo), run replays and
+  // post-mortems, resolve findings, and install provider credentials.
+  //
+  // Viewers may still INGEST — that is how the quickstart and the public demo
+  // work, it is rate-limited, and writing a trace into the demo org is cheap
+  // and self-contained. Everything that spends money, mutates a repo, or
+  // changes configuration is denied. Webhooks authenticate by HMAC, not role.
+  const VIEWER_WRITABLE = [/^\/api\/v1\/traces\/?$/, /^\/v1\/traces\/?$/];
+  app.addHook("preHandler", async (request, reply) => {
+    const method = request.method.toUpperCase();
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") return;
+    if (request.url.startsWith("/api/v1/webhooks")) return;
+    if (request.authUser?.role !== "viewer") return;
+
+    const path = request.url.split("?")[0] ?? "";
+    if (VIEWER_WRITABLE.some((re) => re.test(path))) return;
+    return reply.forbidden("This credential is read-only: it may ingest traces but not modify anything else");
+  });
   const rateLimitSweep = setInterval(cleanupExpiredEntries, 60_000);
   if (typeof rateLimitSweep.unref === "function") rateLimitSweep.unref();
   app.addHook("onClose", async () => clearInterval(rateLimitSweep));
@@ -173,6 +194,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     logger: isLocalDev
       ? { level: "debug", transport: { target: "pino-pretty", options: { colorize: true } } }
       : { level: "info" },
+    // Must match index.ts — see the note there on rate-limit bucketing.
+    trustProxy: 1,
+    bodyLimit: 8 * 1024 * 1024,
   });
   registerApp(app);
   await app.ready();

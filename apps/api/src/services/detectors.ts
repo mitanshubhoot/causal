@@ -4,8 +4,11 @@ import type { FastifyInstance } from "fastify";
 export async function listDetectors(fastify: FastifyInstance, orgId: string): Promise<Array<Record<string, unknown>>> {
   const rows = (await fastify.pg`
     SELECT d.id, d.name, d.type, d.description, d.enabled,
-           COUNT(f.id) FILTER (WHERE f.resolved_at IS NULL) AS open_findings,
-           COUNT(f.id) AS total_findings,
+           -- DISTINCT is required: joining findings AND runs on the same
+           -- detector fans out, so a plain COUNT multiplies findings by the
+           -- number of runs (3 findings x 200 runs reported 600).
+           COUNT(DISTINCT f.id) FILTER (WHERE f.resolved_at IS NULL) AS open_findings,
+           COUNT(DISTINCT f.id) AS total_findings,
            COUNT(DISTINCT r.id) AS total_runs
     FROM detectors d
     LEFT JOIN trace_findings f ON f.detector_id = d.id

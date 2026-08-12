@@ -47,16 +47,20 @@ export function mapLiveToDemo(detail: Record<string, unknown>, rca: Record<strin
           confidence: Number(finding["confidence"] ?? 0.9),
           summary: String(finding["summary"] ?? ""),
           triggeredSpanId: String(finding["triggeredSpanId"] ?? spans[0]?.id ?? ""),
-          alertedVia: ["slack"],
-          judgeModel: String(finding["judgeModel"] ?? "claude-haiku-4-5"),
+          // Only what the API actually told us — inventing "slack" here claimed
+          // an alert had been delivered that may never have been sent.
+          alertedVia: Array.isArray(finding["alertedVia"]) ? (finding["alertedVia"] as ("slack" | "email")[]) : [],
+          judgeModel: String(finding["judgeModel"] ?? "unknown"),
         }
       : undefined,
     rootCause: rca
       ? {
           summary: String(rca["summary"] ?? ""),
           commit: String(rca["commit"] ?? ""),
-          commitMessage: "",
-          author: "causal-rca",
+          commitMessage: String(rca["commitMessage"] ?? ""),
+          // The RCA row records the model that produced it; "causal-rca" was a
+          // made-up author string presented as if a person or agent signed it.
+          author: String(rca["model"] ?? ""),
           file: String(rca["file"] ?? ""),
           line: Number(rca["line"] ?? 0),
           explanation: String(rca["explanation"] ?? ""),
@@ -70,15 +74,25 @@ export function mapLiveToDemo(detail: Record<string, unknown>, rca: Record<strin
           number: Number(rca["prNumber"] ?? 0),
           title: String(rca["fixTitle"] ?? "Proposed fix"),
           branch: `causal/fix-${String(rca["id"] ?? "").slice(0, 8)}`,
-          base: "main",
-          status: rca["prStatus"] === "opened" ? "verified" : "open",
-          filesChanged: 1,
+          base: String(rca["baseBranch"] ?? "main"),
+          // "verified" means the causal-replay check RAN THE TESTS and they
+          // passed — the API reports that as `verified`. Opening a PR is not
+          // verification, and mapping it to "verified" here was the one place
+          // the product asserted something untrue at runtime.
+          status: rca["verified"] === true ? "verified" : "open",
+          filesChanged: Number(rca["filesChanged"] ?? (diff.length ? 1 : 0)),
           additions,
           deletions,
           description: String(rca["fixDescription"] ?? ""),
           file: String(rca["file"] ?? ""),
           diff,
-          checks: rca["prStatus"] === "opened" ? [{ name: "opened", status: "pass" }] : [],
+          // Only report a check we were actually told about.
+          checks:
+            rca["verified"] === true
+              ? [{ name: "causal-replay", status: "pass" as const }]
+              : rca["prStatus"] === "opened"
+                ? [{ name: "causal-replay", status: "pending" as const }]
+                : [],
         }
       : undefined,
   };

@@ -33,6 +33,13 @@ const app = Fastify({
   logger: isLocalDev
     ? { level: "debug", transport: { target: "pino-pretty", options: { colorize: true } } }
     : { level: "info" },
+  // Behind Vercel/Render every request arrives from the proxy, so without this
+  // `request.ip` is the proxy's address and the whole fleet shares ONE
+  // rate-limit bucket. Only trust the hop in front of us.
+  trustProxy: 1,
+  // LLM traces carry prompt/completion text; Fastify's 1 MiB default rejects
+  // realistic payloads. Spans are separately capped at 2000 per trace.
+  bodyLimit: 8 * 1024 * 1024,
 });
 
 // Surface any error during request handling in the response body so we

@@ -3,6 +3,8 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { getTrace } from "./traces.js";
 import { openFixPr, type PrResult } from "./github-pr.js";
 import { collectGitEvidence, type GitEvidence } from "./git-context.js";
+import { withSandbox, sandboxAvailable } from "./sandbox.js";
+import { verifyFix, type VerificationResult } from "./verify.js";
 import { config } from "../config.js";
 
 const IS_DEMO = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
@@ -136,6 +138,71 @@ Produce ONLY a JSON object: {"summary": short root-cause, "explanation": 2-3 sen
 }
 
 /**
+ * Verify a proposed fix by running the repo's own test suite against it.
+ *
+ * Returns null when verification could not be attempted at all (sandbox
+ * disabled, no repo mapping, no patch) — the caller must then NOT claim the fix
+ * is verified. Never throws: a verification failure must not lose the RCA.
+ */
+async function runVerification(
+  fastify: FastifyInstance,
+  orgId: string,
+  repoFullName: string | null,
+  rca: RcaResult
+): Promise<VerificationResult | null> {
+  if (!config.SANDBOX_ENABLED || !sandboxAvailable() || !repoFullName || !rca.file) return null;
+
+  const inst = (await fastify.pg`
+    SELECT installation_id FROM github_installations WHERE org_id = ${orgId} ORDER BY created_at ASC LIMIT 1
+  `.catch(() => [])) as Array<{ installation_id: string | number }>;
+  const installationId = inst[0]?.installation_id;
+  if (installationId == null) return null;
+
+  try {
+    return await withSandbox(
+      {
+        repoFullName,
+        installationId: Number(installationId),
+        ref: rca.commit ?? null,
+        logger: fastify.log,
+      },
+      async (sandbox) => {
+        // Establish a baseline first: if the suite is already red at this
+        // commit, a green run after our patch proves nothing and a red one
+        // isn't our fault.
+        const baseline = await verifyFix({ sandbox, logger: fastify.log });
+        if (!baseline.ran) return baseline;
+
+        const patch = unifiedDiffFor(rca);
+        if (!patch) return { ...baseline, ran: false, passed: false, reason: "no patch to apply" };
+
+        const applied = await sandbox.applyPatch(patch);
+        if (!applied.applied) {
+          return { ...baseline, ran: false, passed: false, reason: `patch did not apply: ${applied.error ?? "unknown"}` };
+        }
+        const after = await verifyFix({ sandbox, logger: fastify.log });
+        // Only a red→green transition is real evidence the fix works.
+        if (baseline.passed && after.passed) return { ...after, reason: "suite was already green before the patch" };
+        return after;
+      }
+    );
+  } catch (err) {
+    fastify.log.warn({ err, repoFullName }, "fix verification could not run");
+    return null;
+  }
+}
+
+/** Render our structured diff back to a unified patch git can apply. */
+function unifiedDiffFor(rca: RcaResult): string | null {
+  if (!rca.fixDiff?.length || !rca.file) return null;
+  const body = rca.fixDiff
+    .map((l) => (l.kind === "add" ? `+${l.text}` : l.kind === "del" ? `-${l.text}` : l.kind === "meta" ? l.text : ` ${l.text}`))
+    .join("\n");
+  if (!/^(---|\+\+\+|@@)/m.test(body)) return null; // no hunk header — not applicable
+  return `${body}\n`;
+}
+
+/**
  * Run RCA for a trace's latest finding. Produces a root cause + proposed fix and
  * stores an rca_runs row. Opening a real GitHub PR requires a repo→installation
  * mapping (not wired here), so the fix is stored as `proposed`.
@@ -192,24 +259,47 @@ export async function runRca(fastify: FastifyInstance, orgId: string, traceId: s
   // exist); persist the outcome on the run.
   let pr: PrResult = { prStatus: "proposed" };
   if (rcaId) {
-    pr = await openFixPr(fastify, orgId, {
-      id: rcaId,
-      summary: rca.summary,
-      explanation: rca.explanation,
-      counterfactual: rca.counterfactual,
-      file: rca.file,
-      fixTitle: rca.fixTitle,
-      fixDescription: rca.fixDescription,
-      repoFullName: traceRepo,
-      commit: rca.commit,
-    });
+    // Actually verify the fix before we let anything call it verified: clone
+    // the repo at the failing commit, apply the patch, and RUN the test suite.
+    // Without this the check run can only ever be "neutral" — which is why
+    // `verified` was false by construction.
+    const verification = await runVerification(fastify, orgId, traceRepo, rca);
+
+    pr = await openFixPr(
+      fastify,
+      orgId,
+      {
+        id: rcaId,
+        summary: rca.summary,
+        explanation: rca.explanation,
+        counterfactual: rca.counterfactual,
+        file: rca.file,
+        fixTitle: rca.fixTitle,
+        fixDescription: rca.fixDescription,
+        repoFullName: traceRepo,
+        commit: rca.commit,
+      },
+      verification
+    );
+    // Record what verification actually did — including when it did not run —
+    // so `verified` is a stored fact rather than something inferred downstream.
+    await fastify.pg`
+      UPDATE rca_runs
+      SET verified = ${pr.verified === true},
+          verification = ${fastify.pg.json((verification ?? null) as unknown as Parameters<typeof fastify.pg.json>[0])},
+          commit_message = ${evidence.commit?.message ?? null},
+          commit_author = ${evidence.commit?.author ?? null}
+      WHERE id = ${rcaId}
+    `.catch((err: unknown) => fastify.log.warn({ err }, "could not persist verification"));
+
     if (pr.prStatus === "opened") {
       // Persist the diff computed from the ACTUAL patch (not the model's
       // independently-invented one) so the UI can't disagree with the commit.
       await fastify.pg`
         UPDATE rca_runs
         SET pr_status = ${pr.prStatus}, pr_url = ${pr.prUrl ?? null}, pr_number = ${pr.prNumber ?? null},
-            fix_diff = ${fastify.pg.json((pr.diff ?? rca.fixDiff) as unknown as Parameters<typeof fastify.pg.json>[0])}
+            fix_diff = ${fastify.pg.json((pr.diff ?? rca.fixDiff) as unknown as Parameters<typeof fastify.pg.json>[0])},
+            files_changed = ${pr.diff ? 1 : null}
         WHERE id = ${rcaId}
       `;
       if (pr.diff) rca.fixDiff = pr.diff;
@@ -232,7 +322,8 @@ export async function runRca(fastify: FastifyInstance, orgId: string, traceId: s
 export async function getRca(fastify: FastifyInstance, orgId: string, traceId: string): Promise<Record<string, unknown> | null> {
   const rows = (await fastify.pg`
     SELECT id, status, summary, commit_sha, file, line, explanation, counterfactual, confidence, hops_upstream,
-           fix_title, fix_description, fix_diff, pr_status, pr_url, pr_number, model, created_at
+           fix_title, fix_description, fix_diff, pr_status, pr_url, pr_number, model, created_at,
+           verified, verification, base_branch, files_changed, commit_message, commit_author
     FROM rca_runs WHERE trace_id = ${traceId} AND org_id = ${orgId} ORDER BY created_at DESC LIMIT 1
   `) as Array<Record<string, unknown>>;
   const r = rows[0];
@@ -256,5 +347,12 @@ export async function getRca(fastify: FastifyInstance, orgId: string, traceId: s
     prNumber: r["pr_number"] === null ? null : Number(r["pr_number"]),
     model: r["model"],
     createdAt: r["created_at"],
+    // Verification is a recorded fact: true only when the suite ran and passed.
+    verified: r["verified"] === true,
+    verification: r["verification"] ?? null,
+    baseBranch: r["base_branch"] ?? null,
+    filesChanged: r["files_changed"] === null ? null : Number(r["files_changed"]),
+    commitMessage: r["commit_message"] ?? null,
+    commitAuthor: r["commit_author"] ?? null,
   };
 }

@@ -73,11 +73,15 @@ export async function askCopilot(
   let answer: string;
   let model = "deterministic";
   if (anthropic) {
-    const prior = (await fastify.pg`
+    // Take the most RECENT 20 and restore chronological order. Taking the
+    // oldest 20 meant that past message 20 the question just asked fell outside
+    // the window entirely and the model was re-sent stale history.
+    const recent = (await fastify.pg`
       SELECT role, content FROM copilot_messages
       WHERE org_id = ${orgId} AND trace_id = ${traceId}
-      ORDER BY created_at ASC LIMIT 20
+      ORDER BY created_at DESC LIMIT 20
     `) as Array<{ role: "user" | "assistant"; content: string }>;
+    const prior = recent.slice().reverse();
 
     const res = await anthropic.messages.create({
       model: config.COPILOT_MODEL,
@@ -99,7 +103,10 @@ export async function askCopilot(
     VALUES (${orgId}, ${traceId}, 'assistant', ${answer}, ${model})
   `;
 
-  return { answer, model, grounded: true };
+  // `grounded` means an LLM reasoned over the trace context. The deterministic
+  // fallback still reads real trace data, but it is templated, not reasoned —
+  // reporting it as grounded overstated what happened.
+  return { answer, model, grounded: anthropic !== null };
 }
 
 /** No-API-key fallback: still answers from real trace data, just without an LLM. */
