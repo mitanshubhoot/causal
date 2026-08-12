@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import type { SpanKind, SpanStatus, DetectorType } from "@/lib/mock-observability";
-import { Bot, Brain, Wrench, Globe, Database, Code2, Copy, Check, Sparkles, Workflow, Search, Terminal } from "lucide-react";
+import { Bot, Brain, Wrench, Globe, Database, Code2, Copy, Check, Sparkles, Workflow, Search, Terminal, ChevronDown, Maximize2, Minimize2 } from "lucide-react";
 
 export const SURFACE = "bg-[#0a0a0b]";
 export const PANEL = "bg-[#0f0f11] border border-white/[0.06]";
@@ -108,6 +108,63 @@ export function CopyButton({ value, className = "" }: { value: string; className
     >
       {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
     </button>
+  );
+}
+
+/**
+ * Collapsible section with a chevron — the disclosure pattern a trace detail
+ * needs, since prompts and reports are far too long to sit inline.
+ * `scroll` clamps the body height with its own scrollbar; the expand toggle
+ * lifts the clamp so long content can be read in full.
+ */
+export function Section({
+  label,
+  children,
+  defaultOpen = true,
+  copyValue,
+  scroll = false,
+  count,
+}: {
+  label: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  copyValue?: string;
+  scroll?: boolean;
+  count?: number;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="rounded-md border border-white/[0.06] overflow-hidden">
+      <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-white/[0.06] bg-white/[0.02]">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1.5 min-w-0 flex-1 text-left group"
+        >
+          <ChevronDown
+            className={`w-3 h-3 text-zinc-600 group-hover:text-zinc-300 transition-transform flex-shrink-0 ${open ? "" : "-rotate-90"}`}
+          />
+          <MonoLabel className="group-hover:text-zinc-300 transition-colors">{label}</MonoLabel>
+          {count !== undefined && <span className="font-mono text-[10px] text-zinc-600">({count})</span>}
+        </button>
+        {open && scroll && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            title={expanded ? "Collapse" : "Expand"}
+            className="text-zinc-600 hover:text-zinc-300 transition-colors flex-shrink-0"
+          >
+            {expanded ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+          </button>
+        )}
+        {copyValue !== undefined && <CopyButton value={copyValue} className="flex-shrink-0" />}
+      </div>
+      {open && (
+        <div className={scroll ? (expanded ? "max-h-[60vh] overflow-auto" : "max-h-56 overflow-auto") : ""}>
+          {children}
+        </div>
+      )}
+    </div>
   );
 }
 

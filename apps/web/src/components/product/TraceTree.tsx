@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { DemoSpan } from "@/lib/mock-observability";
 import { KIND_META, STATUS_META, fmtDuration, fmtTokens } from "./ui";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 
 interface Rollup {
   tokensIn: number;
@@ -135,5 +135,24 @@ export function TraceTree({
   };
   walk(null, 0);
 
-  return <div className="py-1">{rows}</div>;
+  const parentIds = spans.filter((s) => children.has(s.id)).map((s) => s.id);
+  const allCollapsed = parentIds.length > 0 && parentIds.every((id) => collapsed.has(id));
+
+  return (
+    <div>
+      {parentIds.length > 1 && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/[0.04] sticky top-0 bg-[#0a0a0b] z-10">
+          <button
+            onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(parentIds))}
+            className="inline-flex items-center gap-1 font-mono text-[10px] tracking-[0.08em] uppercase text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            {allCollapsed ? <ChevronsUpDown className="w-3 h-3" /> : <ChevronsDownUp className="w-3 h-3" />}
+            {allCollapsed ? "Expand all" : "Collapse all"}
+          </button>
+          <span className="ml-auto font-mono text-[10px] text-zinc-600">{spans.length} spans</span>
+        </div>
+      )}
+      <div className="py-1">{rows}</div>
+    </div>
+  );
 }
