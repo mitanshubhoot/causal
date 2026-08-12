@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { getTrace } from "./traces.js";
 import { openFixPr, type PrResult } from "./github-pr.js";
+import { collectGitEvidence, type GitEvidence } from "./git-context.js";
 import { config } from "../config.js";
 
 const IS_DEMO = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
@@ -72,10 +73,43 @@ function heuristicRca(trace: TraceView, span: SpanView): RcaResult {
   };
 }
 
-async function rcaWithLlm(trace: TraceView, span: SpanView): Promise<RcaResult | null> {
+async function rcaWithLlm(trace: TraceView, span: SpanView, evidence: GitEvidence): Promise<RcaResult | null> {
   if (!anthropic) return null;
   const git = span.git ?? null;
-  const prompt = `You are an SRE agent doing root-cause analysis on an AI-agent failure.\n\nService: ${trace.service}\nDetector: ${trace.finding?.title ?? "failure"}\nFailing span: ${span.name} [${span.kind}] status=${span.status} error="${span.error ?? ""}"${git ? ` at ${git.file}:${git.line} (commit ${git.commit})` : ""}\n\nProduce ONLY a JSON object: {"summary": short root-cause, "explanation": 2-3 sentences, "counterfactual": one "if X, this wouldn't have happened" sentence, "confidence": 0..1, "fixTitle": conventional-commit style, "fixDescription": what the fix does, "fixDiff": array of {"kind":"add"|"del"|"ctx"|"meta","text":...} showing a minimal patch}.`;
+
+  // Give the model the actual code and commit — it used to see only a path and
+  // a line number, which is not enough to root-cause anything.
+  const codeBlock = evidence.snippet
+    ? `\n\nSOURCE at ${evidence.snippet.file} (commit ${git?.commit ?? "HEAD"}):\n${evidence.snippet.lines
+        .map((l) => `${l.marked ? ">>" : "  "} ${l.n}: ${l.text}`)
+        .join("\n")}`
+    : "";
+  const commitBlock = evidence.commit
+    ? `\n\nSUSPECT COMMIT ${evidence.commit.sha}\nauthor: ${evidence.commit.author}\ndate: ${evidence.commit.date}\nmessage: ${evidence.commit.message}\nfiles: ${(evidence.commit.files ?? []).map((f) => `${f.filename} (+${f.additions}/-${f.deletions})`).join(", ")}${
+        (evidence.commit.files ?? [])
+          .filter((f) => f.patch && git && f.filename === git.file)
+          .map((f) => `\n\nPATCH for ${f.filename}:\n${f.patch}`)
+          .join("")
+      }`
+    : "";
+
+  // Ordered trace context so the model can distinguish origin from symptom.
+  const spanBlock = trace.spans
+    .map((s) => `- ${s.name} [${s.kind}] ${s.status}${s.error ? ` error="${s.error}"` : ""}${s.git ? ` @${s.git.file}:${s.git.line}` : ""}`)
+    .join("\n");
+
+  const prompt = `You are an SRE agent doing root-cause analysis on an AI-agent failure.
+
+Service: ${trace.service}
+Detector: ${trace.finding?.title ?? "failure"}
+Failing span: ${span.name} [${span.kind}] status=${span.status} error="${span.error ?? ""}"${git ? ` at ${git.file}:${git.line} (commit ${git.commit})` : ""}
+
+TRACE (in order — the earliest failure is usually the origin, later ones are symptoms):
+${spanBlock}${codeBlock}${commitBlock}
+
+Root-cause the EARLIEST failure, not the loudest downstream symptom. Base every claim on the evidence above.
+
+Produce ONLY a JSON object: {"summary": short root-cause, "explanation": 2-3 sentences citing the code/commit, "counterfactual": one "if X, this wouldn't have happened" sentence, "confidence": 0..1, "fixTitle": conventional-commit style, "fixDescription": what the fix does, "fixDiff": array of {"kind":"add"|"del"|"ctx"|"meta","text":...} showing a minimal patch}.`;
   const res = await anthropic.messages.create({
     model: config.RCA_MODEL,
     max_tokens: 900,
@@ -121,15 +155,24 @@ export async function runRca(fastify: FastifyInstance, orgId: string, traceId: s
     trace.spans.find((s) => s.status === "warn");
   if (!span) return null;
 
+  // Pull real git evidence (commit metadata + the source at the failing line)
+  // before reasoning, so the model isn't guessing from a path and a line number.
+  const traceRepo = (trace as unknown as { repo?: string }).repo ?? null;
+  const evidence = await collectGitEvidence(
+    fastify, orgId, traceRepo, span.git?.file ?? null, span.git?.line ?? null, span.git?.commit ?? null
+  );
+
   let rca: RcaResult | null = null;
   if (anthropic) {
     try {
-      rca = await rcaWithLlm(trace, span);
+      rca = await rcaWithLlm(trace, span, evidence);
     } catch (err) {
       fastify.log.warn({ err, traceId }, "LLM RCA failed — falling back to heuristic");
     }
   }
   if (!rca) rca = heuristicRca(trace, span);
+  // hopsUpstream was hardcoded to 1; use the real distance when we resolved it.
+  if (evidence.resolved) rca.hopsUpstream = evidence.hopsUpstream;
 
   const rows = (await fastify.pg`
     INSERT INTO rca_runs (
@@ -157,16 +200,32 @@ export async function runRca(fastify: FastifyInstance, orgId: string, traceId: s
       file: rca.file,
       fixTitle: rca.fixTitle,
       fixDescription: rca.fixDescription,
+      repoFullName: traceRepo,
+      commit: rca.commit,
     });
     if (pr.prStatus === "opened") {
+      // Persist the diff computed from the ACTUAL patch (not the model's
+      // independently-invented one) so the UI can't disagree with the commit.
       await fastify.pg`
-        UPDATE rca_runs SET pr_status = ${pr.prStatus}, pr_url = ${pr.prUrl ?? null}, pr_number = ${pr.prNumber ?? null}
+        UPDATE rca_runs
+        SET pr_status = ${pr.prStatus}, pr_url = ${pr.prUrl ?? null}, pr_number = ${pr.prNumber ?? null},
+            fix_diff = ${fastify.pg.json((pr.diff ?? rca.fixDiff) as unknown as Parameters<typeof fastify.pg.json>[0])}
         WHERE id = ${rcaId}
       `;
+      if (pr.diff) rca.fixDiff = pr.diff;
     }
   }
 
-  return { rcaId, ...rca, prStatus: pr.prStatus, prUrl: pr.prUrl, prNumber: pr.prNumber };
+  return {
+    rcaId,
+    ...rca,
+    prStatus: pr.prStatus,
+    prUrl: pr.prUrl,
+    prNumber: pr.prNumber,
+    // Only true when the causal-replay check run was actually published.
+    verified: pr.verified === true,
+    gitEvidence: evidence.resolved,
+  };
 }
 
 /** Fetch the latest RCA run for a trace. */

@@ -70,6 +70,12 @@ const EnvSchema = z.object({
   RCA_MODEL: z.string().default("claude-sonnet-4-5"),
   COPILOT_MODEL: z.string().default("claude-sonnet-4-5"),
   SLACK_INCIDENT_CHANNEL: z.string().optional(),
+
+  // Email alerting (Resend or SendGrid — whichever key is present)
+  RESEND_API_KEY: z.string().optional(),
+  SENDGRID_API_KEY: z.string().optional(),
+  ALERT_EMAIL_TO: z.string().optional(),
+  ALERT_EMAIL_FROM: z.string().default("alerts@causal.dev"),
 });
 
 function loadConfig() {

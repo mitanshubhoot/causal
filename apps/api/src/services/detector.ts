@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { getTrace } from "./traces.js";
 import { notifySlackChannel } from "./slack.js";
+import { sendEmailAlert } from "./email.js";
 import { config } from "../config.js";
 
 const IS_DEMO = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
@@ -172,11 +173,34 @@ export async function runDetector(fastify: FastifyInstance, orgId: string, trace
     VALUES (${orgId}, ${detectorRow?.id ?? null}, ${traceId}, true, ${id}, ${judgeModel})
   `;
 
+  // Alerts — Slack and/or email, whichever is configured.
+  const alertedVia: string[] = [];
   if (config.ENABLE_SLACK_NOTIFICATIONS && config.SLACK_INCIDENT_CHANNEL) {
+    alertedVia.push("slack");
     void notifySlackChannel(
       config.SLACK_INCIDENT_CHANNEL,
       `:rotating_light: Causal detector — *${verdict.title}* in \`${trace.service}\` (${Math.round(verdict.confidence * 100)}% · ${LABEL[verdict.detector]})`
     ).catch((err) => fastify.log.warn({ err }, "slack alert failed"));
+  }
+  if (config.ALERT_EMAIL_TO) {
+    alertedVia.push("email");
+    const failing = trace.spans.find((s) => s.id === verdict.triggeredSpanId);
+    void sendEmailAlert(fastify, {
+      severity: verdict.severity,
+      subject: `[Causal] ${verdict.severity.toUpperCase()} — ${verdict.title}`,
+      heading: verdict.title,
+      body: verdict.summary,
+      facts: [
+        { label: "service", value: trace.service },
+        { label: "detector", value: LABEL[verdict.detector] },
+        { label: "confidence", value: `${Math.round(verdict.confidence * 100)}%` },
+        { label: "trace", value: traceId },
+        ...(failing?.name ? [{ label: "span", value: failing.name }] : []),
+        ...(failing?.git ? [{ label: "origin", value: `${failing.git.file}:${failing.git.line} @ ${failing.git.commit}` }] : []),
+      ],
+      linkUrl: `${config.APP_URL}/incidents/${traceId}`,
+      linkLabel: "Open the trace",
+    }).catch((err) => fastify.log.warn({ err }, "email alert failed"));
   }
 
   if (config.ENABLE_AUTO_RCA) {
@@ -190,5 +214,5 @@ export async function runDetector(fastify: FastifyInstance, orgId: string, trace
     });
   }
 
-  return { findingId: id, ...verdict };
+  return { findingId: id, ...verdict, alertedVia };
 }
