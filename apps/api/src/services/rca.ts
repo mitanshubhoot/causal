@@ -3,8 +3,11 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { getTrace } from "./traces.js";
 import { openFixPr, type PrResult } from "./github-pr.js";
 import { collectGitEvidence, type GitEvidence } from "./git-context.js";
-import { withSandbox, sandboxAvailable } from "./sandbox.js";
-import { verifyFix, type VerificationResult } from "./verify.js";
+// sandbox.ts / verify.ts are imported LAZILY inside runVerification. They pull
+// in node:child_process and a large module graph that is only ever needed when
+// SANDBOX_ENABLED is on, and this file sits on the serverless cold-start path —
+// which is exactly what previously blew Vercel's function timeout.
+import type { VerificationResult } from "./verify.js";
 import { config } from "../config.js";
 
 const IS_DEMO = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
@@ -150,7 +153,15 @@ async function runVerification(
   repoFullName: string | null,
   rca: RcaResult
 ): Promise<VerificationResult | null> {
-  if (!config.SANDBOX_ENABLED || !sandboxAvailable() || !repoFullName || !rca.file) return null;
+  // Cheap gate first, so the heavy module graph is never loaded when the
+  // feature is off (which is the default, and always the case on serverless).
+  if (!config.SANDBOX_ENABLED || !repoFullName || !rca.file) return null;
+
+  const [{ withSandbox, sandboxAvailable }, { verifyFix }] = await Promise.all([
+    import("./sandbox.js"),
+    import("./verify.js"),
+  ]);
+  if (!sandboxAvailable()) return null;
 
   const inst = (await fastify.pg`
     SELECT installation_id FROM github_installations WHERE org_id = ${orgId} ORDER BY created_at ASC LIMIT 1
