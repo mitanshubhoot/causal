@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
-  Activity, Eye, LayoutGrid, Github, Search, ChevronDown, X, Waypoints, ScanSearch,
-  ArrowLeft, ListTree, GanttChart, ShieldAlert, PanelLeft, Database, Sparkles,
+  Search, ChevronDown, X, Waypoints, ScanSearch,
+  ListTree, GanttChart, ShieldAlert, PanelLeft, Sparkles,
 } from "lucide-react";
 import { ProvenanceExplorer } from "@/components/ProvenanceExplorer";
 import { getMockTrace } from "@/lib/mock-data";
@@ -12,14 +12,12 @@ import { getObservabilityDemo, getTraceList, getAllDemos } from "@/lib/mock-obse
 import type { ObservabilityDemo, IncidentDemo, TraceRow } from "@/lib/mock-observability";
 import { fetchTraceList, fetchTraceDetail, fetchRca, LIVE_TRACES } from "@/lib/traces-api";
 import { mapLiveToDemo, mapLiveRow } from "@/lib/live-traces";
-import { LogoMark } from "@/components/LogoMark";
 import { TraceTree } from "@/components/product/TraceTree";
 import { Timeline } from "@/components/product/Timeline";
 import { SpanDetail } from "@/components/product/SpanDetail";
 import { Copilot } from "@/components/product/Copilot";
 import { FixPrView } from "@/components/product/panels";
-import { DetectorsView, DashboardView } from "@/components/product/views";
-import { EvalsView } from "@/components/product/EvalsView";
+import { ProductNav, NAV_ITEMS } from "@/components/product/ProductNav";
 import { TraceActions } from "@/components/product/TraceActions";
 import { CommandPalette, type Command } from "@/components/product/CommandPalette";
 import { SeverityChip, STATUS_META, CopyButton, DETECTOR_LABEL } from "@/components/product/ui";
@@ -28,7 +26,6 @@ interface PageProps {
   params: { id: string };
 }
 
-type View = "tracing" | "detectors" | "evals" | "dashboard";
 type ListTab = "traces" | "users" | "sessions";
 
 function tokens(n: number): string {
@@ -90,10 +87,8 @@ function useLiveExplorer(activeId: string): LiveData | null {
   return state;
 }
 
-const REPO_URL = "https://github.com/mitanshubhoot/causal";
-
 export default function IncidentPage({ params }: PageProps) {
-  const [view, setView] = useState<View>("tracing");
+  const router = useRouter();
   const [activeId, setActiveId] = useState(params.id);
   const [selectedSpanId, setSelectedSpanId] = useState(() => defaultSpanId(getObservabilityDemo(params.id)));
   const [modal, setModal] = useState<null | "fixpr" | "graph">(null);
@@ -101,19 +96,18 @@ export default function IncidentPage({ params }: PageProps) {
   const [search, setSearch] = useState("");
   const [treeMode, setTreeMode] = useState<"trace" | "timeline">("trace");
   const [wsOpen, setWsOpen] = useState(false);
-  // Pane visibility. The Copilot is the point of the product, so it is open by
-  // default: inline from xl, and as a drawer below that. Its toggle is ALWAYS
-  // visible, so it can never become unreachable.
+  // Pane visibility. Every pane is open by default — the full five-pane view is
+  // the product. Nothing is collapsed to buy space; instead TraceActions
+  // collapses to a dropdown whenever the tree pane is too narrow for full
+  // buttons, and both pane toggles sit in the trace header.
   //
-  // Five fixed panes don't fit at xl, so the traces LIST is what yields — it
-  // starts collapsed until 2xl, leaving the trace tree real room. Both toggles
-  // sit in the trace header, and TraceActions collapses to a dropdown whenever
-  // the tree pane is too narrow for full buttons.
+  // The Copilot is inline from xl and a drawer below it, so it stays usable on
+  // narrow screens. Its toggle is ALWAYS visible: it can never become
+  // unreachable the way it briefly did.
   const [showList, setShowList] = useState(true);
-  const [showCopilot, setShowCopilot] = useState(false);
+  const [showCopilot, setShowCopilot] = useState(true);
   useEffect(() => {
     setShowCopilot(window.matchMedia("(min-width: 1280px)").matches);
-    setShowList(window.matchMedia("(min-width: 1536px)").matches);
   }, []);
 
   const live = useLiveExplorer(activeId);
@@ -140,7 +134,6 @@ export default function IncidentPage({ params }: PageProps) {
 
   const openIncident = (id: string) => {
     setActiveId(id);
-    setView("tracing");
   };
 
   const selectedSpan = demo.spans.find((s) => s.id === selectedSpanId) ?? demo.spans[0]!;
@@ -175,11 +168,11 @@ export default function IncidentPage({ params }: PageProps) {
   const commands = useMemo<Command[]>(() => {
     const cmds: Command[] = [];
     traceRows.forEach((r, i) =>
-      cmds.push({ id: `t-${i}`, label: r.name, group: "Traces", hint: r.timestamp, run: () => { setActiveId(r.id); setView("tracing"); } })
+      cmds.push({ id: `t-${i}`, label: r.name, group: "Traces", hint: r.timestamp, run: () => setActiveId(r.id) })
     );
-    cmds.push({ id: "v-trace", label: "Tracing", group: "Views", run: () => setView("tracing") });
-    cmds.push({ id: "v-det", label: "Detectors", group: "Views", run: () => setView("detectors") });
-    cmds.push({ id: "v-dash", label: "Dashboard", group: "Views", run: () => setView("dashboard") });
+    NAV_ITEMS.forEach(({ href, label }) =>
+      cmds.push({ id: `v-${href}`, label, group: "Views", run: () => router.push(href) })
+    );
     if (demo.finding) {
       if (demo.fixPr) cmds.push({ id: "a-pr", label: `Open fix PR #${demo.fixPr.number}`, group: "Actions", run: () => setModal("fixpr") });
       cmds.push({ id: "a-graph", label: "Open causal graph", group: "Actions", run: () => setModal("graph") });
@@ -187,51 +180,11 @@ export default function IncidentPage({ params }: PageProps) {
     return cmds;
   }, [demo, traceRows]);
 
-  const navItems: { id: View; label: string; Icon: typeof Activity }[] = [
-    { id: "tracing", label: "Tracing", Icon: Activity },
-    { id: "detectors", label: "Detectors", Icon: Eye },
-    { id: "evals", label: "Datasets & Evals", Icon: Database },
-    { id: "dashboard", label: "Dashboard", Icon: LayoutGrid },
-  ];
 
   return (
     <div className="h-full flex bg-[#0a0a0b] text-zinc-300 overflow-hidden">
-      {/* ── Nav rail ── */}
-      <aside className="hidden lg:flex w-[176px] flex-col border-r border-white/[0.06] flex-shrink-0">
-        <Link href="/" className="flex items-center gap-2 px-4 h-12 border-b border-white/[0.06] hover:bg-white/[0.02] transition-colors">
-          <LogoMark size={20} />
-          <span className="text-[14px] font-semibold text-zinc-100 tracking-tight">Causal</span>
-        </Link>
-        <nav className="flex-1 p-2 space-y-0.5">
-          {navItems.map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              onClick={() => setView(id)}
-              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-                view === id ? "bg-white/[0.06] text-zinc-100" : "text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]"
-              }`}
-            >
-              <Icon className="w-4 h-4" strokeWidth={1.75} />
-              {label}
-            </button>
-          ))}
-        </nav>
-        <div className="p-2 border-t border-white/[0.06] space-y-0.5">
-          <Link href="/incidents" className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03] transition-colors">
-            <ArrowLeft className="w-4 h-4" strokeWidth={1.75} /> All incidents
-          </Link>
-          <a href={REPO_URL} target="_blank" rel="noreferrer" className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03] transition-colors">
-            <Github className="w-4 h-4" strokeWidth={1.75} /> GitHub
-          </a>
-          <div className="flex items-center gap-2 px-2.5 py-1.5 mt-1">
-            <div className="w-5 h-5 rounded-full bg-indigo-500/20 border border-indigo-400/20 flex items-center justify-center font-mono text-[9px] text-indigo-200">DW</div>
-            <span className="font-mono text-[11px] text-zinc-500">Demo workspace</span>
-          </div>
-        </div>
-      </aside>
+      <ProductNav activeHref="/incidents" back={{ href: "/incidents", label: "All incidents" }} />
 
-      {view === "tracing" ? (
-        <>
           {/* ── Traces list ── */}
           <aside className={`${showList ? "hidden lg:flex" : "hidden"} w-[224px] flex-col border-r border-white/[0.06] flex-shrink-0`}>
             <div className="relative">
@@ -371,7 +324,7 @@ export default function IncidentPage({ params }: PageProps) {
               demo={demo}
               onOpenFixPr={() => setModal("fixpr")}
               onOpenGraph={() => setModal("graph")}
-              onPromote={() => setView("evals")}
+              onPromote={() => router.push("/evals")}
             />
             {demo.finding && (
               <button
@@ -404,7 +357,7 @@ export default function IncidentPage({ params }: PageProps) {
           </section>
 
           {/* ── Copilot ── */}
-          {/* Inline pane at 2xl where there is room; a right-hand drawer below
+          {/* Inline pane from xl where there is room; a right-hand drawer below
               that, so the Copilot is reachable at every width. */}
           {showCopilot && (
             <>
@@ -418,14 +371,6 @@ export default function IncidentPage({ params }: PageProps) {
               </section>
             </>
           )}
-        </>
-      ) : view === "detectors" ? (
-        <DetectorsView onOpen={openIncident} />
-      ) : view === "evals" ? (
-        <EvalsView onOpenTrace={openIncident} />
-      ) : (
-        <DashboardView demos={demos} onOpen={openIncident} />
-      )}
 
       <CommandPalette commands={commands} />
 

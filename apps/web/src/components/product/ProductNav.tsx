@@ -22,7 +22,13 @@ export const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", Icon: LayoutGrid, match: /^\/dashboard/ },
 ] as const;
 
-export function ProductNav({ activeHref }: { activeHref?: string }) {
+export function ProductNav({
+  activeHref,
+  back = { href: "/", label: "Home" },
+}: {
+  activeHref?: string;
+  back?: { href: string; label: string };
+}) {
   const pathname = usePathname() ?? "";
   return (
     <aside className="hidden lg:flex w-[176px] flex-col border-r border-white/[0.06] flex-shrink-0">
@@ -54,10 +60,10 @@ export function ProductNav({ activeHref }: { activeHref?: string }) {
 
       <div className="p-2 border-t border-white/[0.06] space-y-0.5">
         <Link
-          href="/"
+          href={back.href}
           className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03] transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" strokeWidth={1.75} /> Home
+          <ArrowLeft className="w-4 h-4" strokeWidth={1.75} /> {back.label}
         </Link>
         <a
           href={REPO_URL}

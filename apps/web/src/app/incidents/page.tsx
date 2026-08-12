@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Search, ChevronRight, AlertOctagon, ShieldAlert, GitPullRequest, Gauge } from "lucide-react";
 import { getAllDemos } from "@/lib/mock-observability";
 import { LogoMark } from "@/components/LogoMark";
+import { NAV_ITEMS } from "@/components/product/ProductNav";
 import { SeverityChip, ConfidenceMeter, MonoLabel, DETECTOR_LABEL, STATUS_META } from "@/components/product/ui";
 
 type SevFilter = "all" | "P1" | "P2" | "P3";
@@ -51,6 +52,20 @@ export default function IncidentsPage() {
         </Link>
         <span className="text-zinc-700">/</span>
         <span className="text-[13px] text-zinc-400">Incidents</span>
+        {/* The other product surfaces are real routes — reachable from here,
+            not buried inside a single trace. */}
+        <nav className="hidden md:flex items-center gap-1 ml-3">
+          {NAV_ITEMS.filter((n) => n.href !== "/incidents").map(({ href, label, Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12.5px] text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors"
+            >
+              <Icon className="w-3.5 h-3.5" strokeWidth={1.75} />
+              {label}
+            </Link>
+          ))}
+        </nav>
         <div className="ml-auto flex items-center gap-4">
           <span className="font-mono text-[9px] tracking-[0.14em] text-indigo-200/80 uppercase border border-indigo-400/25 bg-indigo-500/[0.08] px-2.5 py-1 rounded-full">
             Demo workspace
