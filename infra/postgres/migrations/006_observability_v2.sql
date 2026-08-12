@@ -23,9 +23,21 @@ ALTER TABLE spans ADD CONSTRAINT spans_kind_check CHECK (
 -- that other constraints depend on. Three tables reference it: spans (004),
 -- trace_findings (004) and rca_runs (005). Missing any one of them aborts the
 -- migration, which silently blocks 007 and 008 too.
+--
+-- Both the ORIGINAL names (from 004/005) and the names this file creates below
+-- must be dropped. The second set matters because this migration is re-runnable
+-- by construction: docker-compose mounts migrations/ into
+-- /docker-entrypoint-initdb.d, so a fresh volume applies every file WITHOUT
+-- recording it in schema_migrations — and the first `pnpm db:migrate` afterwards
+-- replays 006 against a database where *_trace_fkey already exist. Dropping only
+-- the old names left those depending on traces_pkey, so the DROP below failed,
+-- the runner aborted, and 007–010 never ran.
 ALTER TABLE spans          DROP CONSTRAINT IF EXISTS spans_trace_id_fkey;
 ALTER TABLE trace_findings DROP CONSTRAINT IF EXISTS trace_findings_trace_id_fkey;
 ALTER TABLE rca_runs       DROP CONSTRAINT IF EXISTS rca_runs_trace_id_fkey;
+ALTER TABLE spans          DROP CONSTRAINT IF EXISTS spans_trace_fkey;
+ALTER TABLE trace_findings DROP CONSTRAINT IF EXISTS trace_findings_trace_fkey;
+ALTER TABLE rca_runs       DROP CONSTRAINT IF EXISTS rca_runs_trace_fkey;
 
 ALTER TABLE traces DROP CONSTRAINT IF EXISTS traces_pkey;
 ALTER TABLE traces ADD  CONSTRAINT traces_pkey PRIMARY KEY (org_id, id);

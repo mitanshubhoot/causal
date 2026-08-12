@@ -60,7 +60,7 @@ export async function assembleTraceGraph(
         for (const nid of nodeIds) {
           const nRows = await fastify.pg`
             SELECT id, layer, kind, timestamp, agent_id, model_version, session_id, payload_text
-            FROM causal_nodes WHERE id = ${nid}
+            FROM causal_nodes WHERE id = ${nid} AND org_id = ${orgId}
           ` as Array<Record<string, unknown>>;
           if (nRows[0]) {
             const r = nRows[0];
@@ -90,7 +90,7 @@ export async function assembleTraceGraph(
         if (!n.payload || Object.keys(n.payload).length === 0) {
           try {
             const neoRows = await fastify.neo4j.run<{ n: Record<string, unknown> }>(
-              `MATCH (n:CausalNode {id: $id}) RETURN n`, { id: n.id }
+              `MATCH (n:CausalNode {id: $id, orgId: $orgId}) RETURN n`, { id: n.id, orgId }
             );
             if (neoRows[0]) {
               // Neo4j driver returns Node objects — unwrap .properties if needed
@@ -254,10 +254,15 @@ async function fetchAncestorGraph(
   const nodeMap = new Map<string, CausalNode>();
   const edgeMap = new Map<string, CausalEdge>();
 
-  // Always include root node
+  // Always include the root node — scoped to the caller's org.
+  //
+  // The ancestor traversal above is org-scoped, so a cross-tenant root simply
+  // returns no ancestors. This seed used to be unscoped, which handed the root
+  // node's payload (reasoning text, spec text, commit hashes) to any org that
+  // could name its id. Callers take rootNodeId straight from the request body.
   const rootRows = await fastify.neo4j.run<{ n: Record<string, unknown> }>(
-    `MATCH (n:CausalNode {id: $id}) RETURN n`,
-    { id: rootNodeId }
+    `MATCH (n:CausalNode {id: $id, orgId: $orgId}) RETURN n`,
+    { id: rootNodeId, orgId }
   );
   if (rootRows[0]) nodeMap.set(rootNodeId, neo4jToNode(rootRows[0].n));
 
