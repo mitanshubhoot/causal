@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import type { DemoSpan } from "@/lib/mock-observability";
-import { KIND_META, STATUS_META } from "./ui";
+import { KIND_META, STATUS_META, fmtDuration } from "./ui";
 
 export function Timeline({
   spans,
@@ -43,7 +43,7 @@ export function Timeline({
                 className="absolute top-1/2 -translate-y-1/2 font-mono text-[10px] text-zinc-500 tabular-nums"
                 style={{ left: `calc(${Math.min(left + width, 84)}% + 6px)` }}
               >
-                {s.durationMs}ms
+                {fmtDuration(s.durationMs)}
               </span>
             </span>
           </button>

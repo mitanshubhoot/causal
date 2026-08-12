@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import type { SpanKind, SpanStatus, DetectorType } from "@/lib/mock-observability";
-import { Bot, Brain, Wrench, Globe, Database, Code2, Copy, Check } from "lucide-react";
+import { Bot, Brain, Wrench, Globe, Database, Code2, Copy, Check, Sparkles, Workflow, Search, Terminal } from "lucide-react";
 
 export const SURFACE = "bg-[#0a0a0b]";
 export const PANEL = "bg-[#0f0f11] border border-white/[0.06]";
@@ -20,6 +20,10 @@ export const KIND_META: Record<SpanKind, { label: string; Icon: typeof Bot; tone
   http: { label: "HTTP", Icon: Globe, tone: "text-sky-300/70" },
   db: { label: "DB", Icon: Database, tone: "text-violet-300/70" },
   function: { label: "FN", Icon: Code2, tone: "text-zinc-400" },
+  skill: { label: "SKILL", Icon: Sparkles, tone: "text-amber-300/80" },
+  workflow: { label: "FLOW", Icon: Workflow, tone: "text-emerald-300/70" },
+  search: { label: "SEARCH", Icon: Search, tone: "text-sky-300/70" },
+  shell: { label: "SHELL", Icon: Terminal, tone: "text-orange-300/70" },
 };
 
 export const STATUS_META: Record<SpanStatus, { dot: string; text: string; bar: string }> = {
@@ -34,6 +38,22 @@ export const DETECTOR_LABEL: Record<DetectorType, string> = {
   intent_drift: "Intent drift",
   safety: "Safety violation",
 };
+
+/** Human duration: 910ms · 8.4s · 1m 24s · 16m 48s */
+export function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.round((ms % 60_000) / 1000);
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+}
+
+/** Compact tokens: 980 · 18.4K · 1.2M */
+export function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(Math.round(n));
+}
 
 export function SeverityChip({ severity }: { severity: string }) {
   const tone =

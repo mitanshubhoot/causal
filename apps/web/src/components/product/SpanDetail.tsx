@@ -1,7 +1,7 @@
 "use client";
 
 import type { DemoSpan } from "@/lib/mock-observability";
-import { KIND_META, STATUS_META, MonoLabel, CopyButton } from "./ui";
+import { KIND_META, STATUS_META, MonoLabel, CopyButton, fmtDuration, fmtTokens } from "./ui";
 import { GitCommit, AlertTriangle, GitBranch, User, Boxes } from "lucide-react";
 
 export interface TraceContext {
@@ -22,18 +22,14 @@ function ContextRow({ Icon, label, value }: { Icon: typeof User; label: string; 
   );
 }
 
-function fmtDur(ms: number): string {
-  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
-  return `${ms}ms`;
-}
-
 function IOBlock({ label, text }: { label: string; text: string }) {
   return (
     <div className="rounded-md border border-white/[0.06] overflow-hidden">
-      <div className="px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.02]">
+      <div className="flex items-center px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.02]">
         <MonoLabel>{label}</MonoLabel>
+        <CopyButton value={text} className="ml-auto" />
       </div>
-      <pre className="px-3 py-2 text-[11.5px] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words font-mono max-h-52 overflow-auto">
+      <pre className="px-3 py-2 text-[11.5px] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words font-mono max-h-72 overflow-auto">
         {text}
       </pre>
     </div>
@@ -58,12 +54,23 @@ export function SpanDetail({ span, trace }: { span: DemoSpan; trace?: TraceConte
             Span kind: <span className="text-zinc-200">{span.kind}</span>
           </span>
           <span className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.08em] uppercase text-zinc-400 border border-white/10 rounded px-2 py-1">
-            Latency: <span className="text-zinc-200">{fmtDur(span.durationMs)}</span>
+            Latency: <span className="text-zinc-200">{fmtDuration(span.durationMs)}</span>
           </span>
           <span className={`inline-flex items-center gap-1 font-mono text-[10px] tracking-[0.08em] uppercase font-semibold ${STATUS_META[span.status].text}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${STATUS_META[span.status].dot}`} />
             {span.status}
           </span>
+          {(span.tokensIn !== undefined || span.tokensOut !== undefined) && (
+            <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-zinc-400 border border-white/10 rounded px-2 py-1 tabular-nums">
+              {fmtTokens(span.tokensIn ?? 0)} → {fmtTokens(span.tokensOut ?? 0)}
+              <span className="text-zinc-600">({fmtTokens((span.tokensIn ?? 0) + (span.tokensOut ?? 0))})</span>
+            </span>
+          )}
+          {span.cost !== undefined && (
+            <span className="inline-flex items-center font-mono text-[10px] text-zinc-400 border border-white/10 rounded px-2 py-1 tabular-nums">
+              ${span.cost.toFixed(4)}
+            </span>
+          )}
         </div>
 
         {/* Trace-level context — shown on the root span, like a real APM. */}

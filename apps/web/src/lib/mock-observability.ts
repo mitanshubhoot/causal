@@ -8,7 +8,9 @@
  * INCIDENT node id used in the /incidents/[id] route.
  */
 
-export type SpanKind = "agent" | "llm" | "tool" | "http" | "db" | "function";
+export type SpanKind =
+  | "agent" | "llm" | "tool" | "http" | "db" | "function"
+  | "skill" | "workflow" | "search" | "shell";
 export type SpanStatus = "ok" | "error" | "warn";
 
 export interface DemoSpan {
@@ -20,6 +22,10 @@ export interface DemoSpan {
   durationMs: number;
   status: SpanStatus;
   attributes: { label: string; value: string }[];
+  // per-span economics (LLM spans) — rolled up onto ancestors in the tree
+  tokensIn?: number;
+  tokensOut?: number;
+  cost?: number;
   // prompt in/out for LLM & agent spans (shown in the span detail like a real APM)
   io?: { input?: string; output?: string };
   // git correlation (only on the spans that map to source)
