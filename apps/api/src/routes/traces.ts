@@ -1,6 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { ingestTrace, listTraces, getTrace, type IngestTrace } from "../services/traces.js";
+import { runDetector } from "../services/detector.js";
+import { runRca, getRca } from "../services/rca.js";
+import { getProvenance } from "../services/provenance.js";
+import { config } from "../config.js";
 
 const SpanSchema = z.object({
   id: z.string().min(1),
@@ -34,6 +38,19 @@ const tracesPlugin: FastifyPluginAsync = async (fastify) => {
     const { orgId } = request.authUser;
     const body = IngestSchema.parse(request.body) as IngestTrace;
     const result = await ingestTrace(fastify, orgId, body);
+
+    // Run the detector inline (fire-and-forget) when enabled — no separate
+    // worker/queue needed at this scale (our "lighter than TraceRoot" choice).
+    if (config.ENABLE_DETECTORS) {
+      setImmediate(async () => {
+        try {
+          await runDetector(fastify, orgId, result.traceId);
+        } catch (err) {
+          fastify.log.error({ err, traceId: result.traceId }, "inline detector failed");
+        }
+      });
+    }
+
     return reply.code(201).send(result);
   });
 
@@ -51,6 +68,38 @@ const tracesPlugin: FastifyPluginAsync = async (fastify) => {
     const trace = await getTrace(fastify, orgId, request.params.id);
     if (!trace) return reply.notFound("Trace not found");
     return trace;
+  });
+
+  // POST /api/v1/traces/:id/detect — run the LLM-as-judge detector on a trace.
+  fastify.post<{ Params: { id: string } }>("/:id/detect", async (request, reply) => {
+    const { orgId } = request.authUser;
+    const finding = await runDetector(fastify, orgId, request.params.id);
+    if (!finding) return { identified: false };
+    return finding;
+  });
+
+  // POST /api/v1/traces/:id/rca — root-cause the latest finding + propose a fix.
+  fastify.post<{ Params: { id: string } }>("/:id/rca", async (request, reply) => {
+    const { orgId } = request.authUser;
+    const rca = await runRca(fastify, orgId, request.params.id);
+    if (!rca) return reply.badRequest("No finding to root-cause on this trace");
+    return rca;
+  });
+
+  // GET /api/v1/traces/:id/rca — the latest RCA run for a trace.
+  fastify.get<{ Params: { id: string } }>("/:id/rca", async (request, reply) => {
+    const { orgId } = request.authUser;
+    const rca = await getRca(fastify, orgId, request.params.id);
+    if (!rca) return reply.notFound("No RCA run for this trace");
+    return rca;
+  });
+
+  // GET /api/v1/traces/:id/provenance — link the trace's commit to causal nodes.
+  fastify.get<{ Params: { id: string } }>("/:id/provenance", async (request, reply) => {
+    const { orgId } = request.authUser;
+    const prov = await getProvenance(fastify, orgId, request.params.id);
+    if (!prov) return reply.notFound("Trace not found");
+    return prov;
   });
 };
 

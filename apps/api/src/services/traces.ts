@@ -70,9 +70,10 @@ export async function ingestTrace(fastify: FastifyInstance, orgId: string, t: In
         start_ms: s.startMs ?? 0,
         duration_ms: s.durationMs ?? 0,
         status: s.status ?? "ok",
-        attributes: JSON.stringify(s.attributes ?? []),
-        io: s.io ? JSON.stringify(s.io) : null,
-        git: s.git ? JSON.stringify(s.git) : null,
+        // jsonb columns — sql.json() so porsager sends JSON, not a PG array/text.
+        attributes: sql.json(s.attributes ?? []),
+        io: sql.json(s.io ?? null),
+        git: sql.json(s.git ?? null),
         error: s.error ?? null,
       }));
       await sql`

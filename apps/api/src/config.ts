@@ -62,6 +62,13 @@ const EnvSchema = z.object({
   ENABLE_VECTOR_EMBEDDINGS: boolEnv(false),
   ENABLE_SLACK_NOTIFICATIONS: boolEnv(true),
   MIN_CONFIDENCE_THRESHOLD: z.coerce.number().default(0.5),
+
+  // v2 observability — detectors + agentic RCA
+  ENABLE_DETECTORS: boolEnv(false),      // run the LLM-as-judge on ingest
+  ENABLE_AUTO_RCA: boolEnv(false),       // auto-run RCA when a detector fires
+  DETECTOR_MODEL: z.string().default("claude-haiku-4-5"),
+  RCA_MODEL: z.string().default("claude-sonnet-4-5"),
+  SLACK_INCIDENT_CHANNEL: z.string().optional(),
 });
 
 function loadConfig() {

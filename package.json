@@ -14,7 +14,8 @@
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "infra:logs": "docker compose -f infra/docker-compose.yml logs -f",
     "db:migrate": "node infra/postgres/migrate.js",
-    "db:seed": "tsx apps/api/src/seed-demo.ts"
+    "db:seed": "tsx apps/api/src/seed-demo.ts",
+    "db:seed-traces": "tsx apps/api/src/seed-traces.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

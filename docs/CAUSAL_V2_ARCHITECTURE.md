@@ -203,8 +203,36 @@ The observability wedge (ingest → store → serve traces) is now real code:
 
 The wire shapes deliberately match `apps/web/src/lib/mock-observability.ts`, so the
 web explorer can switch from the mock to `GET /api/v1/traces/:id` with no UI change
-once traces are flowing. **Next:** run against managed infra + seed, then flip the
-web to live data (Phase 1.5); then the detector worker writes `trace_findings` (Phase 2).
+once traces are flowing.
+
+**Phase 1.5 — seed:** `apps/api/src/seed-traces.ts` (`pnpm db:seed-traces`) ingests a
+failing + a healthy trace and runs the detector/RCA, so the endpoints return live data
+locally. Flipping the deployed web demo to live is a config switch (kept on mock by
+default so the demo always works).
+
+**Phase 2 — detectors (landed):** `services/detector.ts` — an LLM-as-judge
+(`DETECTOR_MODEL`, default Haiku) scores each trace for hallucination / tool_failure /
+intent_drift / safety and writes `trace_findings`, with a **heuristic fallback** so it
+still fires in demo mode (no API key). Runs inline on ingest when `ENABLE_DETECTORS=1`
+(fire-and-forget — no separate worker/queue, our "lighter than TraceRoot" choice), or
+via `POST /api/v1/traces/:id/detect`. Fires a Slack alert and (if `ENABLE_AUTO_RCA=1`)
+triggers RCA.
+
+**Phase 3 — agentic RCA + fix (landed):** `services/rca.ts` — root cause (explanation +
+counterfactual, tied to the failing commit) and a proposed fix diff, via `RCA_MODEL`
+(default Sonnet) with a heuristic fallback. Stored in `rca_runs`; `POST/GET
+/api/v1/traces/:id/rca`. Opening a real GitHub PR needs a repo→installation mapping
+(Octokit client already exists in `services/github.ts`); until wired, the fix is stored
+as `proposed`.
+
+**Phase 4 — authoring→outcome link (landed):** `services/provenance.ts` +
+`GET /api/v1/traces/:id/provenance` — ties the trace's failing commit back to the
+six-layer causal nodes (REASONING/CODE/SPEC/INTENT) that produced it, bridging the new
+observability data to the original causal graph.
+
+**Remaining to run in prod:** managed infra + migrations, real Anthropic key (else the
+heuristic paths run), a repo→installation mapping to open live PRs, and flipping the web
+explorer to the live API.
 
 ## 9. Licensing / clean-room note
 
