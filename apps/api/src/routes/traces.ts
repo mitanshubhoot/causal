@@ -4,19 +4,31 @@ import { ingestTrace, listTraces, getTrace, type IngestTrace } from "../services
 import { runDetector } from "../services/detector.js";
 import { runRca, getRca } from "../services/rca.js";
 import { getProvenance } from "../services/provenance.js";
+import { listDetectors, getDetector, listFindings, resolveFinding } from "../services/detectors.js";
+import { askCopilot, getCopilotHistory } from "../services/copilot.js";
 import { config } from "../config.js";
 
 const SpanSchema = z.object({
   id: z.string().min(1),
   parentId: z.string().nullable().optional(),
   name: z.string().min(1),
-  kind: z.enum(["agent", "llm", "tool", "http", "db", "function"]),
+  kind: z.enum(["agent", "llm", "tool", "http", "db", "function", "skill", "workflow", "search", "shell"]),
   startMs: z.number().int().nonnegative().optional(),
   durationMs: z.number().int().nonnegative().optional(),
   status: z.enum(["ok", "warn", "error"]).optional(),
   attributes: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
   io: z.object({ input: z.string().optional(), output: z.string().optional() }).optional(),
   git: z.object({ file: z.string(), line: z.number().int(), commit: z.string() }).optional(),
+  code: z
+    .object({
+      lang: z.string(),
+      startLine: z.number().int(),
+      lines: z.array(z.object({ n: z.number().int(), text: z.string(), marked: z.boolean().optional() })),
+    })
+    .optional(),
+  tokensIn: z.number().int().nonnegative().optional(),
+  tokensOut: z.number().int().nonnegative().optional(),
+  cost: z.number().nonnegative().optional(),
   error: z.string().optional(),
 });
 
@@ -28,7 +40,8 @@ const IngestSchema = z.object({
   tokensIn: z.number().int().nonnegative().optional(),
   tokensOut: z.number().int().nonnegative().optional(),
   cost: z.number().nonnegative().optional(),
-  startedAt: z.string().optional(),
+  // must parse as a date — an invalid string used to blow up the INSERT
+  startedAt: z.string().refine((s) => !Number.isNaN(Date.parse(s)), "startedAt must be a valid date").optional(),
   repo: z.string().optional(),
   gitRef: z.string().optional(),
   user: z.string().optional(),
@@ -105,6 +118,58 @@ const tracesPlugin: FastifyPluginAsync = async (fastify) => {
     const prov = await getProvenance(fastify, orgId, request.params.id);
     if (!prov) return reply.notFound("Trace not found");
     return prov;
+  });
+
+  // ── Causal Copilot ────────────────────────────────────────────────
+  // POST /api/v1/traces/:id/ask — answer a question grounded in the trace.
+  fastify.post<{ Params: { id: string }; Body: { question?: string } }>("/:id/ask", async (request, reply) => {
+    const { orgId } = request.authUser;
+    const question = z.string().min(1).max(2000).safeParse((request.body ?? {}).question);
+    if (!question.success) return reply.badRequest("question is required");
+    const result = await askCopilot(fastify, orgId, request.params.id, question.data);
+    if (!result) return reply.notFound("Trace not found");
+    return result;
+  });
+
+  // GET /api/v1/traces/:id/ask — conversation history for the trace.
+  fastify.get<{ Params: { id: string } }>("/:id/ask", async (request) => {
+    const { orgId } = request.authUser;
+    return { messages: await getCopilotHistory(fastify, orgId, request.params.id) };
+  });
+};
+
+/** Detector + finding routes (mounted at /api/v1). */
+export const detectorsPlugin: FastifyPluginAsync = async (fastify) => {
+  // GET /api/v1/detectors — definitions with open/total finding counts.
+  fastify.get("/detectors", async (request) => {
+    const { orgId } = request.authUser;
+    const detectors = await listDetectors(fastify, orgId);
+    return { detectors, count: detectors.length };
+  });
+
+  // GET /api/v1/detectors/:name — one detector with findings + runs history.
+  fastify.get<{ Params: { name: string } }>("/detectors/:name", async (request, reply) => {
+    const { orgId } = request.authUser;
+    const detector = await getDetector(fastify, orgId, request.params.name);
+    if (!detector) return reply.notFound("Detector not found");
+    return detector;
+  });
+
+  // GET /api/v1/findings — org-wide findings feed for the dashboard.
+  fastify.get<{ Querystring: { limit?: string } }>("/findings", async (request) => {
+    const { orgId } = request.authUser;
+    const limit = Math.min(Number(request.query.limit) || 100, 500);
+    const findings = await listFindings(fastify, orgId, limit);
+    return { findings, count: findings.length };
+  });
+
+  // POST /api/v1/findings/:id/resolve — resolve or reopen a finding.
+  fastify.post<{ Params: { id: string }; Body: { resolved?: boolean } }>("/findings/:id/resolve", async (request, reply) => {
+    const { orgId } = request.authUser;
+    const resolved = (request.body ?? {}).resolved !== false;
+    const ok = await resolveFinding(fastify, orgId, request.params.id, resolved);
+    if (!ok) return reply.notFound("Finding not found");
+    return { findingId: request.params.id, resolved };
   });
 };
 

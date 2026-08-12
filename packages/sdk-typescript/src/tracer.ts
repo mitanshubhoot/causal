@@ -35,6 +35,10 @@ export interface SpanEndOptions {
   attributes?: { label: string; value: string }[];
   io?: { input?: string; output?: string };
   git?: { file: string; line: number; commit: string };
+  /** LLM economics. Recorded per span and rolled up to the trace on ingest. */
+  tokensIn?: number;
+  tokensOut?: number;
+  cost?: number;
 }
 
 interface RecordedSpan {
@@ -48,6 +52,9 @@ interface RecordedSpan {
   attributes?: { label: string; value: string }[];
   io?: { input?: string; output?: string };
   git?: { file: string; line: number; commit: string };
+  tokensIn?: number;
+  tokensOut?: number;
+  cost?: number;
   error?: string;
 }
 
@@ -80,6 +87,9 @@ export class CausalSpan {
     if (opts.attributes) this.rec.attributes = opts.attributes;
     if (opts.io) this.rec.io = opts.io;
     if (opts.git) this.rec.git = opts.git;
+    if (opts.tokensIn !== undefined) this.rec.tokensIn = opts.tokensIn;
+    if (opts.tokensOut !== undefined) this.rec.tokensOut = opts.tokensOut;
+    if (opts.cost !== undefined) this.rec.cost = opts.cost;
     if (opts.error) {
       this.rec.error = opts.error;
       if (!opts.status) this.rec.status = "error";

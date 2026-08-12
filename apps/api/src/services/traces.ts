@@ -1,17 +1,25 @@
 import type { FastifyInstance } from "fastify";
 
 // ── Wire shapes (match the web product surface) ──────────────────────
+export type SpanKind =
+  | "agent" | "llm" | "tool" | "http" | "db" | "function"
+  | "skill" | "workflow" | "search" | "shell";
+
 export interface IngestSpan {
   id: string;
   parentId?: string | null;
   name: string;
-  kind: "agent" | "llm" | "tool" | "http" | "db" | "function";
+  kind: SpanKind;
   startMs?: number;
   durationMs?: number;
   status?: "ok" | "warn" | "error";
   attributes?: { label: string; value: string }[];
   io?: { input?: string; output?: string };
   git?: { file: string; line: number; commit: string };
+  code?: { lang: string; startLine: number; lines: { n: number; text: string; marked?: boolean }[] };
+  tokensIn?: number;
+  tokensOut?: number;
+  cost?: number;
   error?: string;
 }
 
@@ -46,7 +54,23 @@ export async function ingestTrace(fastify: FastifyInstance, orgId: string, t: In
   const spans = t.spans ?? [];
   const root = spans.find((s) => !s.parentId);
   const status = rollupStatus(spans);
-  const startedAt = t.startedAt ? new Date(t.startedAt) : new Date();
+  // Guard against an invalid startedAt string reaching the INSERT.
+  const parsed = t.startedAt ? new Date(t.startedAt) : new Date();
+  const startedAt = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+
+  // Roll span economics up to the trace. The client may send totals, but the
+  // sum of spans is authoritative when spans carry their own numbers.
+  const spanTotals = spans.reduce(
+    (a, s) => ({
+      tokensIn: a.tokensIn + (s.tokensIn ?? 0),
+      tokensOut: a.tokensOut + (s.tokensOut ?? 0),
+      cost: a.cost + (s.cost ?? 0),
+    }),
+    { tokensIn: 0, tokensOut: 0, cost: 0 }
+  );
+  const tokensIn = spanTotals.tokensIn || t.tokensIn || 0;
+  const tokensOut = spanTotals.tokensOut || t.tokensOut || 0;
+  const cost = spanTotals.cost || t.cost || 0;
 
   await fastify.pg.begin(async (tx) => {
     // porsager types the tx handle as TransactionSql (not directly callable in
@@ -60,7 +84,7 @@ export async function ingestTrace(fastify: FastifyInstance, orgId: string, t: In
       VALUES (
         ${t.traceId}, ${orgId}, ${t.service}, ${t.environment ?? "production"},
         ${root?.name ?? null}, ${status}, ${t.model ?? null},
-        ${t.tokensIn ?? 0}, ${t.tokensOut ?? 0}, ${t.cost ?? 0}, ${spans.length},
+        ${tokensIn}, ${tokensOut}, ${cost}, ${spans.length},
         ${t.repo ?? null}, ${t.gitRef ?? null}, ${t.user ?? null}, ${t.sessionId ?? null},
         ${sql.json(t.metadata ?? [])}, ${startedAt}
       )
@@ -81,10 +105,14 @@ export async function ingestTrace(fastify: FastifyInstance, orgId: string, t: In
         attributes: sql.json(s.attributes ?? []),
         io: sql.json(s.io ?? null),
         git: sql.json(s.git ?? null),
+        code: sql.json((s.code ?? null) as never),
+        tokens_in: s.tokensIn ?? null,
+        tokens_out: s.tokensOut ?? null,
+        cost: s.cost ?? null,
         error: s.error ?? null,
       }));
       await sql`
-        INSERT INTO spans ${sql(rows, "trace_id", "id", "org_id", "parent_id", "name", "kind", "start_ms", "duration_ms", "status", "attributes", "io", "git", "error")}
+        INSERT INTO spans ${sql(rows, "trace_id", "id", "org_id", "parent_id", "name", "kind", "start_ms", "duration_ms", "status", "attributes", "io", "git", "code", "tokens_in", "tokens_out", "cost", "error")}
       `;
     }
   });
@@ -129,7 +157,8 @@ export async function getTrace(fastify: FastifyInstance, orgId: string, traceId:
   if (!trace) return null;
 
   const spanRows = (await fastify.pg`
-    SELECT id, parent_id, name, kind, start_ms, duration_ms, status, attributes, io, git, error
+    SELECT id, parent_id, name, kind, start_ms, duration_ms, status, attributes, io, git, code,
+           tokens_in, tokens_out, cost, error
     FROM spans
     WHERE trace_id = ${traceId} AND org_id = ${orgId}
     ORDER BY start_ms ASC
@@ -171,6 +200,10 @@ export async function getTrace(fastify: FastifyInstance, orgId: string, traceId:
       attributes: s["attributes"] ?? [],
       io: s["io"] ?? undefined,
       git: s["git"] ?? undefined,
+      code: s["code"] ?? undefined,
+      tokensIn: s["tokens_in"] === null ? undefined : Number(s["tokens_in"]),
+      tokensOut: s["tokens_out"] === null ? undefined : Number(s["tokens_out"]),
+      cost: s["cost"] === null ? undefined : Number(s["cost"]),
       error: s["error"] ?? undefined,
     })),
     finding: f

@@ -9,12 +9,13 @@ import postgresPlugin from "./plugins/postgres.js";
 import redisPlugin from "./plugins/redis.js";
 import s3Plugin from "./plugins/s3.js";
 import authPlugin from "./middleware/auth.js";
+import { apiRateLimiter, webhookRateLimiter, cleanupExpiredEntries } from "./middleware/rate-limit.js";
 
 // Routes
 import nodesPlugin from "./routes/nodes.js";
 import edgesPlugin from "./routes/edges.js";
 import tracePlugin from "./routes/trace.js";
-import tracesPlugin from "./routes/traces.js";
+import tracesPlugin, { detectorsPlugin } from "./routes/traces.js";
 import replayPlugin from "./routes/replay.js";
 import postmortemPlugin from "./routes/postmortem.js";
 import snapshotsPlugin from "./routes/snapshots.js";
@@ -82,6 +83,17 @@ export function registerApp(app: FastifyInstance): void {
   // Auth
   app.register(authPlugin);
 
+  // Rate limiting — this existed but was never registered, so the public demo
+  // key had unlimited ingest. Webhooks get a tighter window than the API.
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.url.startsWith("/health") || request.url.startsWith("/_ping")) return;
+    const limiter = request.url.startsWith("/api/v1/webhooks") ? webhookRateLimiter : apiRateLimiter;
+    await limiter(request, reply);
+  });
+  const rateLimitSweep = setInterval(cleanupExpiredEntries, 60_000);
+  if (typeof rateLimitSweep.unref === "function") rateLimitSweep.unref();
+  app.addHook("onClose", async () => clearInterval(rateLimitSweep));
+
   // NOTE: the plain `/health` route lives in index.ts (registered before this
   // deferred plugin). Re-registering it here caused FST_ERR_DUPLICATED_ROUTE,
   // which made ready() reject and left the whole API unbootable.
@@ -128,6 +140,7 @@ export function registerApp(app: FastifyInstance): void {
   app.register(snapshotsPlugin,  { prefix: "/api/v1/snapshots" });
   app.register(tracePlugin,      { prefix: "/api/v1/trace" });
   app.register(tracesPlugin,     { prefix: "/api/v1/traces" });
+  app.register(detectorsPlugin,  { prefix: "/api/v1" });
   app.register(replayPlugin,     { prefix: "/api/v1/replay" });
   app.register(postmortemPlugin, { prefix: "/api/v1/postmortem" });
 

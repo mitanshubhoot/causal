@@ -59,11 +59,20 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         // needing to seed an api_keys row in Postgres first.
         const keyHash = createHash("sha256").update(token).digest("hex");
 
+        // The demo key is a PUBLIC credential (it ships in the docs and the web
+        // .env), so it must never confer admin, and never outside a demo
+        // deployment. ALLOW_DEMO_KEY must be set explicitly in production.
         if (keyHash === DEMO_KEY_HASH) {
+          const demoAllowed =
+            process.env["NODE_ENV"] !== "production" ||
+            ["1", "true", "yes"].includes(String(process.env["ALLOW_DEMO_KEY"] ?? "").toLowerCase());
+          if (!demoAllowed) {
+            return reply.unauthorized("Demo key is disabled in this environment");
+          }
           request.authUser = {
             userId: "apikey:demo",
             orgId: DEMO_ORG_ID,
-            role: "admin",
+            role: "viewer", // read-only: a public key must not be able to mutate
           };
           return;
         }

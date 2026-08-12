@@ -68,6 +68,7 @@ const EnvSchema = z.object({
   ENABLE_AUTO_RCA: boolEnv(false),       // auto-run RCA when a detector fires
   DETECTOR_MODEL: z.string().default("claude-haiku-4-5"),
   RCA_MODEL: z.string().default("claude-sonnet-4-5"),
+  COPILOT_MODEL: z.string().default("claude-sonnet-4-5"),
   SLACK_INCIDENT_CHANNEL: z.string().optional(),
 });
 
