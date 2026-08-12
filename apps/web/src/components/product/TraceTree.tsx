@@ -101,7 +101,7 @@ export function TraceTree({
           </span>
           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_META[s.status].dot}`} />
           <m.Icon className={`w-3.5 h-3.5 flex-shrink-0 ${m.tone}`} strokeWidth={1.75} />
-          <span className={`font-mono text-[12px] truncate ${isSel ? "text-zinc-100" : "text-zinc-300"}`}>
+          <span className={`font-mono text-[12px] truncate flex-1 min-w-0 ${isSel ? "text-zinc-100" : "text-zinc-300"}`}>
             {s.name}
           </span>
           <span className="flex-shrink-0 font-mono text-[10.5px] text-zinc-500 tabular-nums ml-1.5">
@@ -114,7 +114,7 @@ export function TraceTree({
           )}
           {/* subtree economics, like a real APM */}
           {showRoll && (
-            <span className="ml-auto hidden lg:flex items-center gap-2 flex-shrink-0 font-mono text-[10px] text-zinc-600 tabular-nums">
+            <span className="hidden xl:flex items-center gap-2 flex-shrink-0 font-mono text-[10px] text-zinc-600 tabular-nums">
               <span>
                 {fmtTokens(roll.tokensIn)} → {fmtTokens(roll.tokensOut)}{" "}
                 <span className="text-zinc-700">({fmtTokens(roll.tokensIn + roll.tokensOut)})</span>
@@ -124,7 +124,7 @@ export function TraceTree({
             </span>
           )}
           {!showRoll && s.cost !== undefined && (
-            <span className="ml-auto hidden lg:block flex-shrink-0 font-mono text-[10px] text-zinc-600 tabular-nums">
+            <span className="hidden xl:block flex-shrink-0 font-mono text-[10px] text-zinc-600 tabular-nums">
               ${s.cost.toFixed(4)}
             </span>
           )}

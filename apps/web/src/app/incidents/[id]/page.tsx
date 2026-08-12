@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Activity, Eye, LayoutGrid, Github, Search, ChevronDown, X, Waypoints, ScanSearch,
-  ArrowLeft, ListTree, GanttChart, ShieldAlert,
+  ArrowLeft, ListTree, GanttChart, ShieldAlert, PanelLeft, PanelRight,
 } from "lucide-react";
 import { ProvenanceExplorer } from "@/components/ProvenanceExplorer";
 import { getMockTrace } from "@/lib/mock-data";
@@ -99,6 +99,9 @@ export default function IncidentPage({ params }: PageProps) {
   const [search, setSearch] = useState("");
   const [treeMode, setTreeMode] = useState<"trace" | "timeline">("trace");
   const [wsOpen, setWsOpen] = useState(false);
+  // Pane visibility — lets the trace tree take the full width when needed.
+  const [showList, setShowList] = useState(true);
+  const [showCopilot, setShowCopilot] = useState(true);
 
   const live = useLiveExplorer(activeId);
   const demo = live?.demo ?? getObservabilityDemo(activeId);
@@ -216,7 +219,7 @@ export default function IncidentPage({ params }: PageProps) {
       {view === "tracing" ? (
         <>
           {/* ── Traces list ── */}
-          <aside className="hidden md:flex w-[248px] flex-col border-r border-white/[0.06] flex-shrink-0">
+          <aside className={`${showList ? "hidden md:flex" : "hidden"} w-[248px] flex-col border-r border-white/[0.06] flex-shrink-0`}>
             <div className="relative">
               <button
                 onClick={() => setWsOpen((v) => !v)}
@@ -295,9 +298,16 @@ export default function IncidentPage({ params }: PageProps) {
 
           {/* ── Trace tree / timeline ── */}
           <section className="flex-1 min-w-0 flex flex-col border-r border-white/[0.06]">
-            <div className="flex items-center gap-2 px-4 h-12 border-b border-white/[0.06] flex-shrink-0">
-              <span className="font-mono text-[12px] text-zinc-400">Trace</span>
-              <span className="font-mono text-[12px] text-zinc-200 truncate">{demo.traceId}</span>
+            <div className="flex items-center gap-2 px-3 h-12 border-b border-white/[0.06] flex-shrink-0">
+              <button
+                onClick={() => setShowList((v) => !v)}
+                title={showList ? "Hide traces list" : "Show traces list"}
+                className={`hidden md:block flex-shrink-0 transition-colors ${showList ? "text-zinc-500 hover:text-zinc-300" : "text-indigo-300/80"}`}
+              >
+                <PanelLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="font-mono text-[12px] text-zinc-400 flex-shrink-0">Trace</span>
+              <span className="font-mono text-[12px] text-zinc-200 truncate min-w-0">{demo.traceId}</span>
               <CopyButton value={demo.traceId} />
               <SeverityChip severity={demo.severity} />
               {demo.finding && (
@@ -319,14 +329,20 @@ export default function IncidentPage({ params }: PageProps) {
                   </button>
                 ))}
               </div>
+              <button
+                onClick={() => setShowCopilot((v) => !v)}
+                title={showCopilot ? "Hide Copilot" : "Show Copilot"}
+                className={`hidden xl:block flex-shrink-0 transition-colors ${showCopilot ? "text-zinc-500 hover:text-zinc-300" : "text-indigo-300/80"}`}
+              >
+                <PanelRight className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <div className="flex items-center gap-3 px-4 h-8 border-b border-white/[0.04] font-mono text-[11px] text-zinc-500 flex-shrink-0">
-              <span className="tabular-nums">{tokens(demo.tokensIn)} → {tokens(demo.tokensOut)} ({tokens(demo.tokensIn + demo.tokensOut)})</span>
-              <span className="text-zinc-700">·</span>
-              <span className="tabular-nums">${demo.cost.toFixed(4)}</span>
-              <span className="text-zinc-700">·</span>
-              <span>{demo.model}</span>
-              <span className="ml-auto text-zinc-600">{demo.spans.length} spans</span>
+            <div className="flex items-center gap-2 px-3 h-8 border-b border-white/[0.04] font-mono text-[11px] text-zinc-500 flex-shrink-0 overflow-hidden whitespace-nowrap">
+              <span className="tabular-nums flex-shrink-0">{tokens(demo.tokensIn)} → {tokens(demo.tokensOut)}</span>
+              <span className="text-zinc-700 flex-shrink-0">·</span>
+              <span className="tabular-nums flex-shrink-0">${demo.cost.toFixed(4)}</span>
+              <span className="hidden lg:inline text-zinc-700">·</span>
+              <span className="hidden lg:inline truncate">{demo.model}</span>
             </div>
             {demo.finding && (
               <button
@@ -359,7 +375,7 @@ export default function IncidentPage({ params }: PageProps) {
           </section>
 
           {/* ── Copilot ── */}
-          <section className="hidden xl:flex w-[360px] flex-col flex-shrink-0">
+          <section className={`${showCopilot ? "hidden xl:flex" : "hidden"} w-[360px] flex-col flex-shrink-0`}>
             <Copilot demo={demo} onOpenFixPr={() => setModal("fixpr")} onOpenGraph={() => setModal("graph")} />
           </section>
         </>
