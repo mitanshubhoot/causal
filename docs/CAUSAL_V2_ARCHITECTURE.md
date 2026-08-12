@@ -175,6 +175,37 @@ the backend goes live.
 - **Cross-cutting:** managed-infra live demo, CI, first 10 tests (ingest, detector
   verdict parsing, auth, RCA tool contracts).
 
+## 8b. Phase 1 — landed in this repo
+
+The observability wedge (ingest → store → serve traces) is now real code:
+
+- **Schema** — `infra/postgres/migrations/004_traces.sql`: `traces`, `spans`
+  (kind/status/attributes/io/git/error, PK `(trace_id, id)`), and `trace_findings`
+  (for the Phase-2 detector). Postgres-first, org-scoped, indexed for list-by-org.
+- **API** — `apps/api/src/routes/traces.ts` + `services/traces.ts`, registered at
+  `/api/v1/traces`:
+  - `POST /api/v1/traces` — OTLP-lite ingest (zod-validated `{traceId, service, spans[]}`),
+    idempotent per trace id, bulk-inserts spans in a transaction.
+  - `GET /api/v1/traces` — recent traces for the org.
+  - `GET /api/v1/traces/:id` — a trace with its spans + finding, in the exact
+    camelCase shape the web product surface already renders.
+- **SDK** — `packages/sdk-typescript/src/tracer.ts` (`CausalTracer`): a
+  dependency-free span collector that exports to the ingest endpoint.
+
+  ```ts
+  const tracer = new CausalTracer({ service: "booking-agent" });
+  await tracer.trace("booking_agent.run", async (t) => {
+    const plan = t.span("llm.plan", "llm");
+    // ... call the model ...
+    plan.end({ status: "ok", io: { input, output } });
+  });
+  ```
+
+The wire shapes deliberately match `apps/web/src/lib/mock-observability.ts`, so the
+web explorer can switch from the mock to `GET /api/v1/traces/:id` with no UI change
+once traces are flowing. **Next:** run against managed infra + seed, then flip the
+web to live data (Phase 1.5); then the detector worker writes `trace_findings` (Phase 2).
+
 ## 9. Licensing / clean-room note
 
 TraceRoot core is Apache-2.0 (permissive) — we may study it and even reuse code **if

@@ -14,6 +14,7 @@ import authPlugin from "./middleware/auth.js";
 import nodesPlugin from "./routes/nodes.js";
 import edgesPlugin from "./routes/edges.js";
 import tracePlugin from "./routes/trace.js";
+import tracesPlugin from "./routes/traces.js";
 import replayPlugin from "./routes/replay.js";
 import postmortemPlugin from "./routes/postmortem.js";
 import snapshotsPlugin from "./routes/snapshots.js";
@@ -126,6 +127,7 @@ export function registerApp(app: FastifyInstance): void {
   app.register(edgesPlugin,      { prefix: "/api/v1/edges" });
   app.register(snapshotsPlugin,  { prefix: "/api/v1/snapshots" });
   app.register(tracePlugin,      { prefix: "/api/v1/trace" });
+  app.register(tracesPlugin,     { prefix: "/api/v1/traces" });
   app.register(replayPlugin,     { prefix: "/api/v1/replay" });
   app.register(postmortemPlugin, { prefix: "/api/v1/postmortem" });
 
