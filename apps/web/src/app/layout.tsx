@@ -32,7 +32,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "Causal — AI-native observability and self-healing for AI agents",
-    description: "Trace every agent run, catch every failure, and ship the fix — automatically.",
+    description: "Trace every agent run, catch every failure, and ship the fix automatically.",
     type: "website",
     url: SITE_URL,
     siteName: "Causal",
@@ -40,7 +40,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Causal — AI-native observability and self-healing for AI agents",
-    description: "Trace every agent run, catch every failure, and ship the fix — automatically.",
+    description: "Trace every agent run, catch every failure, and ship the fix automatically.",
   },
 };
 

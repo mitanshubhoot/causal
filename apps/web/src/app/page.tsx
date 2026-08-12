@@ -762,7 +762,7 @@ function HeroSection() {
             Catch every failure.
           </motion.span>
           <motion.span variants={heroLineVariant} className="block gradient-text">
-            Ship the fix — automatically.
+            Ship the fix automatically.
           </motion.span>
         </motion.h1>
 
