@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Activity, Eye, LayoutGrid, Github, Search, ChevronDown, X, Waypoints, ScanSearch,
-  ArrowLeft, ListTree, GanttChart, ShieldAlert, PanelLeft, PanelRight,
+  ArrowLeft, ListTree, GanttChart, ShieldAlert, PanelLeft, PanelRight, Database,
 } from "lucide-react";
 import { ProvenanceExplorer } from "@/components/ProvenanceExplorer";
 import { getMockTrace } from "@/lib/mock-data";
@@ -19,6 +19,7 @@ import { SpanDetail } from "@/components/product/SpanDetail";
 import { Copilot } from "@/components/product/Copilot";
 import { FixPrView } from "@/components/product/panels";
 import { DetectorsView, DashboardView } from "@/components/product/views";
+import { EvalsView } from "@/components/product/EvalsView";
 import { CommandPalette, type Command } from "@/components/product/CommandPalette";
 import { SeverityChip, STATUS_META, CopyButton, DETECTOR_LABEL } from "@/components/product/ui";
 
@@ -26,7 +27,7 @@ interface PageProps {
   params: { id: string };
 }
 
-type View = "tracing" | "detectors" | "dashboard";
+type View = "tracing" | "detectors" | "evals" | "dashboard";
 type ListTab = "traces" | "users" | "sessions";
 
 function tokens(n: number): string {
@@ -177,6 +178,7 @@ export default function IncidentPage({ params }: PageProps) {
   const navItems: { id: View; label: string; Icon: typeof Activity }[] = [
     { id: "tracing", label: "Tracing", Icon: Activity },
     { id: "detectors", label: "Detectors", Icon: Eye },
+    { id: "evals", label: "Datasets & Evals", Icon: Database },
     { id: "dashboard", label: "Dashboard", Icon: LayoutGrid },
   ];
 
@@ -381,6 +383,8 @@ export default function IncidentPage({ params }: PageProps) {
         </>
       ) : view === "detectors" ? (
         <DetectorsView onOpen={openIncident} />
+      ) : view === "evals" ? (
+        <EvalsView onOpenTrace={openIncident} />
       ) : (
         <DashboardView demos={demos} onOpen={openIncident} />
       )}
