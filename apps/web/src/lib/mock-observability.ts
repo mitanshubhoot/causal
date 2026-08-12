@@ -724,7 +724,7 @@ export interface DetectorEntity {
   type: DetectorType;
   description: string;
   enabled: boolean;
-  findings: { traceId: string; findingId: string; timestamp: string; title: string; severity: string; confidence: number; service: string }[];
+  findings: { traceId: string; findingId: string; timestamp: string; title: string; severity: string; confidence: number; service: string; resolved?: boolean }[];
   runs: { traceId: string; timestamp: string; identified: boolean; service: string }[];
 }
 
@@ -735,24 +735,78 @@ const DETECTOR_DEFS: { name: string; type: DetectorType; description: string }[]
   { name: "safety-v1", type: "safety", description: "Flags policy or safety violations in agent output." },
 ];
 
+/**
+ * Findings history — detectors run continuously, so each carries resolved
+ * findings from earlier days, not just the currently-open incidents. Every
+ * entry links to a real trace so nothing in the UI is a dead end.
+ */
+const FINDING_HISTORY: Record<DetectorType, {
+  findingId: string; timestamp: string; title: string; severity: string; confidence: number; service: string; traceRef: "research" | "checkout" | "support" | "stock" | "voice" | "billing";
+}[]> = {
+  hallucination: [
+    { findingId: "746fa41a-99bc-2c83-f7a4-2b1d", timestamp: "2026-08-11 13:41:32", title: "Fabricated adoption statistics in the synthesis step", severity: "high", confidence: 0.91, service: "research-pipeline", traceRef: "research" },
+    { findingId: "d4b82778-0a72-4185-6877-f1c0", timestamp: "2026-08-10 19:08:40", title: "Cited an SDK method that does not exist in the referenced version", severity: "medium", confidence: 0.78, service: "research-pipeline", traceRef: "research" },
+    { findingId: "f01079d4-d20f-6767-3f0c-9b21", timestamp: "2026-08-10 17:38:44", title: "Invented a refund window not present in the policy document", severity: "high", confidence: 0.86, service: "support-agent", traceRef: "support" },
+    { findingId: "072344d6-3ce0-133b-10b1-7a44", timestamp: "2026-08-09 12:42:51", title: "Quoted a market figure with no supporting tool call", severity: "medium", confidence: 0.72, service: "stock-tool-agent", traceRef: "stock" },
+    { findingId: "7ed6c543-229d-ab44-2b1a-8f03", timestamp: "2026-08-09 14:31:24", title: "Attributed a statistic to a source that was never retrieved", severity: "medium", confidence: 0.69, service: "research-pipeline", traceRef: "research" },
+  ],
+  safety: [
+    { findingId: "9f74f96e-146d-b31d-b83e-6d10", timestamp: "2026-08-11 09:52:18", title: "Clinical guidance drafted without the required disclaimer", severity: "critical", confidence: 0.94, service: "healthcare-voice-bot", traceRef: "voice" },
+    { findingId: "638ecb2c-d623-4eaf-0ad0-d772", timestamp: "2026-08-10 12:32:18", title: "Patient identifiers echoed back in plain text", severity: "high", confidence: 0.88, service: "healthcare-voice-bot", traceRef: "voice" },
+    { findingId: "b21a7f04-8e11-49c2-90aa-3c58", timestamp: "2026-08-09 16:20:05", title: "Full card number surfaced in a tool result", severity: "critical", confidence: 0.96, service: "billing-agent", traceRef: "billing" },
+  ],
+  intent_drift: [
+    { findingId: "c0917bb2-51de-4a77-9e14-2211", timestamp: "2026-08-10 15:04:37", title: "Answered a different question than the one asked", severity: "medium", confidence: 0.74, service: "support-agent", traceRef: "support" },
+    { findingId: "e4471aa9-77b2-4d10-bb35-9f62", timestamp: "2026-08-09 10:19:52", title: "Summary omitted the constraint the user emphasised", severity: "medium", confidence: 0.71, service: "research-pipeline", traceRef: "research" },
+  ],
+  tool_failure: [
+    { findingId: "a1d5c8e0-2b47-4f19-8c03-7e55", timestamp: "2026-08-10 08:14:09", title: "Retry storm after an unhandled timeout in the quotes provider", severity: "high", confidence: 0.89, service: "stock-tool-agent", traceRef: "stock" },
+  ],
+};
+
 export function getDetectors(): DetectorEntity[] {
   const all = [...INCIDENTS, ...HEALTHY];
+  const refToTrace: Record<string, ObservabilityDemo> = {
+    research: H_RESEARCH, checkout: H_CHECKOUT, support: H_SUPPORT,
+    stock: H_STOCK, voice: DEMO_I1, billing: DEMO_I3,
+  };
+
   return DETECTOR_DEFS.map((def, di) => {
-    const findings = INCIDENTS.filter((d) => d.finding.detector === def.type).map((d, i) => ({
+    // currently-open incidents this detector owns
+    const live = INCIDENTS.filter((d) => d.finding.detector === def.type).map((d, i) => ({
       traceId: d.incidentId,
-      findingId: `${def.name.replace(/-v1$/, "")}-${String(di)}${String(i)}${d.traceId.slice(0, 6)}`,
+      findingId: `${def.name.replace(/-v1$/, "")}-${String(di)}${String(i)}-${d.traceId.slice(0, 8)}`,
       timestamp: d.startedAt,
       title: d.finding.title,
       severity: d.finding.severity,
       confidence: d.finding.confidence,
       service: d.service,
     }));
-    const runs = all.map((d) => ({
-      traceId: d.incidentId,
-      timestamp: d.startedAt,
-      identified: d.finding?.detector === def.type,
-      service: d.service,
+    // resolved findings from earlier runs
+    const history = (FINDING_HISTORY[def.type] ?? []).map((h) => ({
+      traceId: refToTrace[h.traceRef]?.incidentId ?? H_RESEARCH.incidentId,
+      findingId: h.findingId,
+      timestamp: h.timestamp,
+      title: h.title,
+      severity: h.severity,
+      confidence: h.confidence,
+      service: h.service,
+      resolved: true,
     }));
+    const findings = [...live, ...history];
+
+    // one run row per evaluation: flagged where a finding exists, else clean
+    const flaggedTraceIds = new Set(live.map((f) => f.traceId));
+    const runs = [
+      ...history.map((h) => ({ traceId: h.traceId, timestamp: h.timestamp, identified: true, service: h.service })),
+      ...all.map((d) => ({
+        traceId: d.incidentId,
+        timestamp: d.startedAt,
+        identified: flaggedTraceIds.has(d.incidentId),
+        service: d.service,
+      })),
+    ];
+
     return { id: `det-${di}`, name: def.name, type: def.type, description: def.description, enabled: true, findings, runs };
   });
 }

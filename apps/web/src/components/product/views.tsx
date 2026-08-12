@@ -24,8 +24,11 @@ function DetectorList({ detectors, onOpen }: { detectors: DetectorEntity[]; onOp
             </div>
             <span className="block text-[12px] text-zinc-500 truncate mt-0.5">{d.description}</span>
           </div>
-          <span className="font-mono text-[11px] text-zinc-500 flex-shrink-0">
-            <span className={d.findings.length ? "text-red-400" : "text-zinc-600"}>{d.findings.length}</span> findings
+          <span className="font-mono text-[11px] text-zinc-500 flex-shrink-0 tabular-nums">
+            <span className={d.findings.some((f) => !f.resolved) ? "text-red-400" : "text-zinc-600"}>
+              {d.findings.filter((f) => !f.resolved).length}
+            </span>{" "}
+            open <span className="text-zinc-700">/</span> {d.findings.length}
           </span>
           <ChevronRight className="w-4 h-4 text-zinc-700 group-hover:text-zinc-400 transition-colors flex-shrink-0" />
         </button>
@@ -79,7 +82,18 @@ function DetectorDetail({ detector, onBack, onOpen }: { detector: DetectorEntity
               <SeverityChip severity={f.severity} />
               <span className="font-mono text-[11px] text-zinc-500">{f.timestamp}</span>
               <span className="min-w-0">
-                <span className="block text-[12.5px] text-zinc-200 truncate">{f.title}</span>
+                <span className="flex items-center gap-2">
+                  <span className="text-[12.5px] text-zinc-200 truncate">{f.title}</span>
+                  <span
+                    className={`flex-shrink-0 font-mono text-[9px] tracking-[0.08em] uppercase px-1.5 py-0.5 rounded border ${
+                      f.resolved
+                        ? "text-emerald-400/80 border-emerald-500/25 bg-emerald-500/[0.06]"
+                        : "text-red-400 border-red-500/25 bg-red-500/[0.08]"
+                    }`}
+                  >
+                    {f.resolved ? "Resolved" : "Open"}
+                  </span>
+                </span>
                 <span className="block font-mono text-[10px] text-zinc-600 truncate">{f.findingId} · {f.service}</span>
               </span>
               <ConfidenceMeter value={f.confidence} />
