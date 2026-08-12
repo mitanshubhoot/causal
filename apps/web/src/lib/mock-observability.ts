@@ -842,6 +842,25 @@ export function hasObservabilityDemo(incidentId: string): boolean {
   return incidentId in DEMOS;
 }
 
+/**
+ * Resolve a wire trace id (the short hex on `demo.traceId`) to the incident id
+ * the explorer route is actually keyed on.
+ *
+ * These are two different identifiers and the difference is easy to miss: a
+ * demo is stored under a uuid-ish `incidentId`, while `traceId` is what appears
+ * on spans and on anything that references a trace from outside — the security
+ * capability, for one. Pushing a traceId at /incidents/:id resolves nothing, so
+ * every such link 404s. Callers must resolve first and only render the link
+ * when this returns non-null.
+ */
+export function resolveTraceToIncident(traceId: string): string | null {
+  if (traceId in DEMOS) return traceId; // already an incident id
+  for (const [incidentId, demo] of Object.entries(DEMOS)) {
+    if (demo.traceId === traceId) return incidentId;
+  }
+  return null;
+}
+
 /** Coherent rows for the traces list panel — every row opens the trace it names. */
 export function getTraceList(): TraceRow[] {
   return TRACE_FEED.map((d) => ({

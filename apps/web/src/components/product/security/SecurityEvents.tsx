@@ -74,6 +74,12 @@ import {
   X,
 } from "lucide-react";
 
+// The explorer is keyed on incidentId while events carry the wire traceId, and the
+// demo dataset holds only a handful of runs — so most security events reference a
+// trace that has no explorer page. Resolve before offering the affordance: a link
+// that 404s is worse than no link.
+import { explorerIncidentFor } from "@/lib/mock-security";
+
 // ── Text safety ───────────────────────────────────────────────────────
 
 /**
@@ -876,7 +882,8 @@ function FlowHop({
     violating ? "border-l-2 border-l-red-500/50 bg-red-500/[0.04]" : "border-l-2 border-l-transparent"
   }`;
 
-  if (!traceId) return <div className={shell}>{body}</div>;
+  const incidentId = traceId ? explorerIncidentFor(traceId) : null;
+  if (!traceId || !incidentId) return <div className={shell}>{body}</div>;
 
   return (
     <button
@@ -1068,13 +1075,20 @@ function EventDetail({
         </span>
         <span className="inline-flex items-center gap-1.5">
           <MonoLabel className="text-zinc-600">trace</MonoLabel>
-          {traceId ? (
+          {traceId && explorerIncidentFor(traceId) ? (
             <button
               onClick={() => onOpenTrace(traceId)}
               className="inline-flex items-center gap-1 font-mono text-[10.5px] text-indigo-300 border border-indigo-400/25 rounded px-1.5 py-0.5 hover:bg-indigo-500/[0.08] transition-colors"
             >
               {traceId} <ArrowUpRight className="w-3 h-3" />
             </button>
+          ) : traceId ? (
+            <span
+              className="font-mono text-[10.5px] text-zinc-500"
+              title="This run is not in the demo trace set, so there is no explorer page to open."
+            >
+              {traceId}
+            </span>
           ) : (
             <span
               className="font-mono text-[10.5px] text-zinc-600"

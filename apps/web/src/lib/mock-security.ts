@@ -211,6 +211,25 @@ const REM_APPROVAL_DIFF: Remediation = {
 // the set-B criticals (gap / bypass / quarantine / break-glass) fire with zero
 // attacks present and are the rows that say whether the machine is running.
 
+/**
+ * Wire traceId → the incidentId the explorer route is keyed on, for the runs the
+ * demo dataset actually has a page for.
+ *
+ * A literal rather than a call into mock-observability: importing that module
+ * here would pull the entire trace fixture into the /security bundle (+64kB of
+ * first-load JS) to answer a two-entry lookup. The security checker asserts this
+ * agrees with resolveTraceToIncident(), so it cannot drift silently.
+ */
+export const EXPLORER_TRACES: Readonly<Record<string, string>> = {
+  "3c4d5e6f7a8b9c00": "01937000-0003-7000-8000-000000000006", // billing-agent
+  "2b3c4d5e6f7a8b90": "01937000-0002-7000-8000-000000000006", // stock-tool-agent
+};
+
+/** Whether a security event's trace has an explorer page to open. */
+export function explorerIncidentFor(traceId: string | null | undefined): string | null {
+  return traceId ? EXPLORER_TRACES[traceId] ?? null : null;
+}
+
 export const SECURITY_EVENTS: SecurityEvent[] = [
   // ── SEC-1042 · the thesis on one screen, ending in a block ──────────
   {

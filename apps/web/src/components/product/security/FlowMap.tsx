@@ -70,6 +70,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+// See SecurityEvents.tsx: a traceId is not an incidentId, and most demo events
+// reference a run the explorer has no page for. Resolve before linking.
+import { explorerIncidentFor } from "@/lib/mock-security";
+
 // ── Layout constants — the only numbers in this file, and none of them are data ──
 
 const NODE_W = 236;
@@ -566,7 +570,7 @@ export function FlowMap({ event, onOpenTrace, className = "" }: FlowMapProps) {
             REVEAL ALL TAINT
             <span className="text-zinc-600 tabular-nums">{graph.dormantTaint.size}</span>
           </button>
-          {onOpenTrace && (
+          {onOpenTrace && explorerIncidentFor(event.traceId) && (
             <button
               onClick={() => onOpenTrace(event.traceId)}
               className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.08em] px-2 py-1 rounded border border-white/10 bg-white/[0.03] text-zinc-400 hover:text-zinc-200 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/70"
@@ -1069,7 +1073,7 @@ function NodeCard({
             <SafeText value={g.node.detail} className="text-zinc-400" />
           </div>
         )}
-        {onOpenTrace && (
+        {onOpenTrace && explorerIncidentFor(event.traceId) && (
           <p className="font-mono text-[9.5px] text-zinc-700 pt-0.5">
             span lives in trace {event.traceId.slice(0, 8)}
           </p>
