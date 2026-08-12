@@ -58,8 +58,19 @@ ${rc ? "The retry spans after the failure are pure waste — fixing the root cau
   }
   if (!rc)
     return `This trace completed successfully — no detector flagged it. All ${demo.spans.length} spans returned ok, latency and cost are nominal. Nothing to fix here.`;
-  if (ql.includes("fix"))
-    return `The fix is a small, safe change in ${rc.file}: ${demo.fixPr?.description ?? "restore the guard with a safe default"} PR #${demo.fixPr?.number} is open and passed causal-replay — use "Open fix PR" to view the diff.`;
+  if (ql.includes("fix")) {
+    const pr = demo.fixPr;
+    if (!pr)
+      return `The fix is a small, safe change in ${rc.file}: restore the guard with a safe default. No pull request has been opened for it yet.`;
+    // "passed causal-replay" used to be asserted unconditionally — and this is
+    // the fallback answer in live mode, so it claimed a replay that never ran
+    // against real traces. Only `verified` means a sandbox ran the tests.
+    const replay =
+      pr.status === "verified"
+        ? "passed causal-replay"
+        : "not been verified — no replay has run against the patch";
+    return `The fix is a small, safe change in ${rc.file}: ${pr.description} PR #${pr.number} is open and has ${replay} — use "Open fix PR" to view the diff.`;
+  }
   if (ql.includes("prevent") || ql.includes("avoid"))
     return `Two guards would have prevented it: a safe default at the failing call site, and a replay/canary check that exercises the real dependency — CI stayed green because it was mocked. Causal now watches for this failure signature across your agents.`;
   return `The run failed at \`${demo.finding?.title.toLowerCase() ?? "the failing span"}\`. ${rc.explanation} Root cause: commit ${rc.commit} (${rc.hopsUpstream} hops upstream), ${Math.round(rc.confidence * 100)}% confidence.`;

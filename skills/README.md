@@ -24,7 +24,7 @@ npx skills add mitanshubhoot/causal --skill causal-debug-incident
 
 Or point any coding agent at this repo:
 
-> Read https://github.com/mitanshubhoot/causal/tree/main/packages/skills/skills and follow the skill that matches what I'm asking for: `causal-quickstart` (first trace in minutes), `causal-instrument-repo` (instrument an existing codebase), `causal-debug-incident` (debug a production failure). Read `AGENTS.md` in that directory first — it holds the rules that apply to all three.
+> Read https://github.com/mitanshubhoot/causal/tree/main/skills and follow the skill that matches what I'm asking for: `causal-quickstart` (first trace in minutes), `causal-instrument-repo` (instrument an existing codebase), `causal-debug-incident` (debug a production failure). Read `AGENTS.md` in that directory first — it holds the rules that apply to all three.
 
 ## Prerequisites
 
@@ -37,4 +37,6 @@ Or point any coding agent at this repo:
 
 `causal_demo_key_2026` is a public demo credential recognized by any Causal API deployment (org `org_demo_causal_001`). Use it to get a trace flowing against the public demo before provisioning a real key. It is public by design — never point it at production data, and never leave it in a committed config.
 
-Also assumed: Node 18+ for the TypeScript SDK (`@causal/sdk`, which uses global `fetch`) or Python 3.11+ for `causal-sdk`, and a git checkout the agent can read, since commit and branch context is what makes RCA land on a specific commit rather than a time window.
+Also assumed: Node 18+ for the TypeScript SDK (`@causal/sdk`, which uses global `fetch`) or Python 3.10+ for `causal-sdk`, and a git checkout the agent can read, since commit and branch context is what makes RCA land on a specific commit rather than a time window.
+
+Neither SDK is published to npm or PyPI yet, so both install from a checkout of this repo by path — each skill's reference file gives the exact commands.

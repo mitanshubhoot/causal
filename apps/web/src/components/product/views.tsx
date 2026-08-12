@@ -3,37 +3,94 @@
 import { useEffect, useMemo, useState } from "react";
 import type { IncidentDemo, DetectorEntity } from "@/lib/mock-observability";
 import { getDetectors } from "@/lib/mock-observability";
-import { fetchDetectors, fetchDetector, LIVE_TRACES } from "@/lib/traces-api";
+import { fetchDetectors, fetchDetector, fetchTraceList, fetchTraceDetail, fetchRca, LIVE_TRACES } from "@/lib/traces-api";
+import { mapLiveToDemo } from "@/lib/live-traces";
 import { DETECTOR_LABEL, SeverityChip, ConfidenceMeter, MonoLabel } from "./ui";
-import { ShieldAlert, ChevronRight, ChevronLeft, AlertOctagon, Activity, DollarSign, GitPullRequest, Eye, CheckCircle2 } from "lucide-react";
+import { ShieldAlert, ChevronRight, ChevronLeft, AlertOctagon, Activity, DollarSign, GitPullRequest, Eye, CheckCircle2, Loader2 } from "lucide-react";
+
+/** Shown while a live fetch is in flight. Rendering mock data under a real id
+ *  while the API answers showed fabricated content attributed to that id. */
+export function LoadingPane({ label }: { label: string }) {
+  return (
+    <div className="h-full flex items-center justify-center p-6">
+      <span className="flex items-center gap-2 font-mono text-[12px] text-zinc-500">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/** Live incidents for the dashboard and the /incidents list — both routes used
+ *  to be mock-only, so NEXT_PUBLIC_USE_LIVE_TRACES=1 changed nothing on either.
+ *  `demos` stays null when the flag is off or the load fails, so the caller
+ *  falls back to the mock instead of rendering an empty workspace. */
+export function useLiveIncidents(): { demos: IncidentDemo[] | null; pending: boolean } {
+  const [demos, setDemos] = useState<IncidentDemo[] | null>(null);
+  const [pending, setPending] = useState(LIVE_TRACES);
+
+  useEffect(() => {
+    if (!LIVE_TRACES) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await fetchTraceList();
+        const out: IncidentDemo[] = [];
+        for (const row of list.filter((t) => t.status !== "ok")) {
+          try {
+            const mapped = mapLiveToDemo(await fetchTraceDetail(row.id), await fetchRca(row.id));
+            if (mapped.finding) out.push(mapped as IncidentDemo);
+          } catch {
+            /* skip this incident */
+          }
+        }
+        if (!cancelled) setDemos(out);
+      } catch {
+        if (!cancelled) setDemos(null); // whole load failed → mock
+      } finally {
+        if (!cancelled) setPending(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { demos, pending };
+}
 
 // ── Detectors view — named detectors, each with Findings + Runs ─────
 function DetectorList({ detectors, onOpen }: { detectors: DetectorEntity[]; onOpen: (d: DetectorEntity) => void }) {
   return (
     <div className="rounded-lg border border-white/[0.06] overflow-hidden">
-      {detectors.map((d) => (
-        <button
-          key={d.id}
-          onClick={() => onOpen(d)}
-          className="w-full flex items-center gap-3 px-4 py-3 text-left border-b border-white/[0.03] hover:bg-white/[0.03] transition-colors group"
-        >
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[13px] text-zinc-100">{d.name}</span>
-              <span className="font-mono text-[9px] tracking-[0.08em] uppercase text-zinc-500 border border-white/10 rounded px-1.5 py-0.5">{DETECTOR_LABEL[d.type]}</span>
+      {detectors.map((d) => {
+        // The list endpoint carries counts, not the findings/runs rows — deriving
+        // the count from the (empty) arrays printed "0 open / 0" for every live
+        // detector.
+        const open = d.openFindings ?? d.findings.filter((f) => !f.resolved).length;
+        const total = d.totalFindings ?? d.findings.length;
+        return (
+          <button
+            key={d.id}
+            onClick={() => onOpen(d)}
+            className="w-full flex items-center gap-3 px-4 py-3 text-left border-b border-white/[0.03] hover:bg-white/[0.03] transition-colors group"
+          >
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${d.enabled ? "bg-emerald-400" : "bg-zinc-600"}`} title={d.enabled ? "Enabled" : "Disabled"} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[13px] text-zinc-100">{d.name}</span>
+                <span className="font-mono text-[9px] tracking-[0.08em] uppercase text-zinc-500 border border-white/10 rounded px-1.5 py-0.5">{DETECTOR_LABEL[d.type]}</span>
+              </div>
+              <span className="block text-[12px] text-zinc-500 truncate mt-0.5">{d.description}</span>
             </div>
-            <span className="block text-[12px] text-zinc-500 truncate mt-0.5">{d.description}</span>
-          </div>
-          <span className="font-mono text-[11px] text-zinc-500 flex-shrink-0 tabular-nums">
-            <span className={d.findings.some((f) => !f.resolved) ? "text-red-400" : "text-zinc-600"}>
-              {d.findings.filter((f) => !f.resolved).length}
-            </span>{" "}
-            open <span className="text-zinc-700">/</span> {d.findings.length}
-          </span>
-          <ChevronRight className="w-4 h-4 text-zinc-700 group-hover:text-zinc-400 transition-colors flex-shrink-0" />
-        </button>
-      ))}
+            <span className="font-mono text-[11px] text-zinc-500 flex-shrink-0 tabular-nums">
+              <span className={open > 0 ? "text-red-400" : "text-zinc-600"}>{open}</span>{" "}
+              open <span className="text-zinc-700">/</span> {total}
+            </span>
+            <ChevronRight className="w-4 h-4 text-zinc-700 group-hover:text-zinc-400 transition-colors flex-shrink-0" />
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -108,6 +165,7 @@ function DetectorDetail({ detector, onBack, onOpen }: { detector: DetectorEntity
             <MonoLabel>Timestamp</MonoLabel>
             <MonoLabel>Service</MonoLabel>
           </div>
+          {detector.runs.length === 0 && <p className="px-4 py-8 text-center font-mono text-[12px] text-zinc-600">No runs.</p>}
           {detector.runs.map((r, i) => (
             <button
               key={i}
@@ -148,6 +206,11 @@ export function DetectorsView({ onOpen }: { onOpen: (id: string) => void }) {
             type: d.type,
             description: d.description,
             enabled: d.enabled,
+            // The counts the API computed. Dropping them here is what made every
+            // live detector read "0 open / 0".
+            openFindings: d.openFindings,
+            totalFindings: d.totalFindings,
+            totalRuns: d.totalRuns,
             findings: [],
             runs: [],
           }))
@@ -213,7 +276,16 @@ function StatTile({ label, value, sub, Icon, tone = "text-zinc-100" }: {
 export function DashboardView({ demos, onOpen }: { demos: IncidentDemo[]; onOpen: (id: string) => void }) {
   const p1 = demos.filter((d) => d.severity === "P1").length;
   const cost = demos.reduce((a, d) => a + d.cost, 0);
-  const avgConf = Math.round((demos.reduce((a, d) => a + d.finding.confidence, 0) / demos.length) * 100);
+  // Each tile has to answer a different question. Three of them rendered
+  // demos.length, so the row repeated one number and called it three metrics.
+  const firing = new Set(demos.map((d) => d.finding.detector)).size;
+  // "Shipped" means causal-replay ran the tests and they passed — the only flag
+  // that carries that claim. An opened PR is not a shipped fix.
+  const verified = demos.filter((d) => d.fixPr?.status === "verified").length;
+  // Nothing to average over → drop the tile rather than print 0% or NaN%.
+  const avgConf = demos.length
+    ? Math.round((demos.reduce((a, d) => a + d.finding.confidence, 0) / demos.length) * 100)
+    : null;
 
   return (
     <div className="h-full overflow-auto">
@@ -226,13 +298,16 @@ export function DashboardView({ demos, onOpen }: { demos: IncidentDemo[]; onOpen
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <StatTile label="Open incidents" value={String(demos.length)} sub={`${p1} P1`} Icon={AlertOctagon} tone="text-red-400" />
-          <StatTile label="Detectors firing" value={String(demos.length)} sub="LLM-as-judge" Icon={ShieldAlert} />
-          <StatTile label="Fixes shipped" value={String(demos.length)} sub="auto PRs, verified" Icon={GitPullRequest} tone="text-emerald-400" />
-          <StatTile label="Avg confidence" value={`${avgConf}%`} sub={`$${cost.toFixed(2)} spend`} Icon={DollarSign} />
+          <StatTile label="Detectors firing" value={String(firing)} sub="with open findings" Icon={ShieldAlert} />
+          <StatTile label="Fixes shipped" value={String(verified)} sub={`of ${demos.length} · causal-replay passed`} Icon={GitPullRequest} tone="text-emerald-400" />
+          {avgConf !== null && (
+            <StatTile label="Avg confidence" value={`${avgConf}%`} sub={`$${cost.toFixed(2)} spend`} Icon={DollarSign} />
+          )}
         </div>
 
         <MonoLabel className="block mb-2">Recent incidents</MonoLabel>
         <div className="rounded-lg border border-white/[0.06] overflow-hidden">
+          {demos.length === 0 && <p className="px-4 py-10 text-center font-mono text-[12px] text-zinc-600">No incidents.</p>}
           {demos.map((d) => (
             <button
               key={d.incidentId}

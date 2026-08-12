@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { IngestSpan, SpanKind } from "./traces.js";
+import { dedupeSpans, type IngestSpan, type SpanKind } from "./traces.js";
 
 /**
  * OpenTelemetry OTLP/HTTP JSON ingest.
@@ -218,7 +218,13 @@ export async function ingestOtlp(
   let spanCount = 0;
 
   for (const [traceId, t] of converted) {
-    const root = t.spans.find((s) => !s.parentId);
+    // scopeSpans and instrumentationLibrarySpans are concatenated above, so a
+    // compatibility-minded exporter hands us the same span twice.
+    const spans = dedupeSpans(t.spans);
+    if (spans.length < t.spans.length) {
+      fastify.log.warn({ traceId, dropped: t.spans.length - spans.length }, "collapsed duplicate span ids");
+    }
+    const root = spans.find((s) => !s.parentId);
     await fastify.pg.begin(async (tx) => {
       const sql = tx as unknown as typeof fastify.pg;
 
@@ -231,7 +237,7 @@ export async function ingestOtlp(
               model     = COALESCE(traces.model, EXCLUDED.model)
       `;
 
-      const rows = t.spans.map((s) => ({
+      const rows = spans.map((s) => ({
         trace_id: traceId,
         id: s.id,
         org_id: orgId,
@@ -280,7 +286,7 @@ export async function ingestOtlp(
         ) agg
         WHERE t.org_id = ${orgId} AND t.id = ${traceId}
       `;
-      spanCount += t.spans.length;
+      spanCount += spans.length;
     });
   }
 

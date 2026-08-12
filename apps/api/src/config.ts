@@ -46,9 +46,6 @@ const EnvSchema = z.object({
   // clear 503 and the server-wide keys above keep working.
   CAUSAL_ENCRYPTION_KEY: z.string().optional(),
 
-  // Auth (Clerk)
-  CLERK_SECRET_KEY: z.string().optional(),
-
   // GitHub App
   GITHUB_APP_ID: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY: z.string().optional(),
@@ -61,7 +58,6 @@ const EnvSchema = z.object({
   LINEAR_WEBHOOK_SECRET: z.string().optional(),
   LANGSMITH_WEBHOOK_SECRET: z.string().optional(),
   SLACK_BOT_TOKEN: z.string().optional(),
-  SLACK_SIGNING_SECRET: z.string().optional(),
 
   // Services
   RCA_SERVICE_URL: z.string().default("http://localhost:8001"),

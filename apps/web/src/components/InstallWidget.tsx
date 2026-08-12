@@ -6,7 +6,9 @@ import { Copy, Check, X, Terminal, Sparkles, Bot } from "lucide-react";
 
 type TabId = "cli" | "prompt" | "skills";
 
-const AGENT_PROMPT = `Install the Causal AI skill from https://github.com/mitanshubhoot/causal/tree/main/packages/skills and use it to add tracing to this application with Causal, following best practices.
+// The skills live at the repo root, not under packages/ — this prompt is the
+// landing page's primary conversion path and a 404 dead-ends it.
+const AGENT_PROMPT = `Install the Causal AI skill from https://github.com/mitanshubhoot/causal/tree/main/skills/causal-instrument-repo and use it to add tracing to this application with Causal, following best practices.
 
 Specifically:
 1. Install the SDK (\`npm i @causal/sdk\` or \`pip install causal-sdk\`).

@@ -4,13 +4,27 @@ Emits one nested trace from a standalone script. Node 18+ (the SDK uses global `
 
 ## 1. Install
 
+`@causal/sdk` is **not yet published to npm**, so install it from a checkout of the Causal repo.
+
+Inside the Causal monorepo it is a workspace dependency:
+
 ```bash
-npm install @causal/sdk
-npm install -D tsx            # runs the .ts file directly; skip if you use the .mjs variant below
+pnpm add @causal/sdk --workspace    # or add "@causal/sdk": "workspace:*" to package.json
+pnpm add -D tsx                     # runs the .ts file directly; skip if you use the .mjs variant below
 ```
 
-Inside the Causal monorepo the package is a workspace dependency instead:
-`pnpm add @causal/sdk --workspace` (or add `"@causal/sdk": "workspace:*"` to `package.json`).
+From a project outside the monorepo, build the package once and install it by path:
+
+```bash
+git clone https://github.com/mitanshubhoot/causal
+cd causal && pnpm install && pnpm --filter @causal/sdk build
+
+cd /path/to/your-project
+npm install /path/to/causal/packages/sdk-typescript
+npm install -D tsx
+```
+
+The build step is required — `package.json` points `main`/`types` at `dist/`, which is not committed.
 
 ## 2. Environment
 
@@ -180,5 +194,5 @@ Keep secrets and PII out of `io` and `attributes` — the values are stored verb
 | `ECONNREFUSED` / `fetch failed`           | API not running, or wrong `CAUSAL_API_URL`   | Start the API (`http://localhost:3001`) or point at the hosted URL. Confirm with `curl $CAUSAL_API_URL/health`. |
 | Script exits 0, nothing in Traces          | Process exited before the export finished    | Keep `await t.flush()` as the last statement; with `tracer.trace()` the flush is automatic but export errors are swallowed by design. |
 | Trace exists, but the UI list looks empty | Filtered to a different service/environment  | Look for service `causal-quickstart`, environment `development`. |
-| `Cannot find module '@causal/sdk'`        | Not installed, or CommonJS project           | `npm install @causal/sdk`; the package is ESM — use `.mjs`/`tsx` or set `"type": "module"`. |
+| `Cannot find module '@causal/sdk'`        | Not installed, `dist/` not built, or CommonJS project | Re-run the install in step 1 (it is a local path, not npm) and `pnpm --filter @causal/sdk build`; the package is ESM — use `.mjs`/`tsx` or set `"type": "module"`. |
 | No detector finding on the trace          | Detectors disabled on the server             | The trace is still correct; enable detectors server-side to see findings. |

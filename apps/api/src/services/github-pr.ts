@@ -1,12 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { Anthropic } from "@anthropic-ai/sdk";
 import { createGithubClient } from "./github.js";
+import { complete } from "./llm.js";
 import { describeVerification, type VerificationResult } from "./verify.js";
 import { config } from "../config.js";
-
-const IS_DEMO = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
-let anthropic: Anthropic | null = null;
-if (!IS_DEMO) anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
 export interface FixContext {
   id: string;
@@ -134,17 +130,29 @@ async function resolveRepo(
   return { owner, repo: name, base: repo.default_branch ?? "main", installationId: Number(installationId) };
 }
 
-async function correctFile(original: string, fix: FixContext): Promise<string | null> {
-  if (!anthropic) return null;
+async function correctFile(
+  fastify: FastifyInstance,
+  orgId: string,
+  original: string,
+  fix: FixContext
+): Promise<string | null> {
   const prompt = `You are fixing a bug in a source file. Return ONLY the full corrected file content — no markdown fences, no commentary.\n\nFile: ${fix.file}\nRoot cause: ${fix.summary}\n${fix.explanation}\nDesired fix: ${fix.fixDescription}\n\n--- CURRENT FILE ---\n${original}\n--- END ---`;
-  const res = await anthropic.messages.create({
-    model: config.RCA_MODEL,
-    max_tokens: 4000,
+  // Routed through the BYOK layer. A module-level Anthropic client made this
+  // feature permanently dead for a workspace on any other provider, and sent
+  // that workspace's private file contents to Anthropic whenever the operator
+  // happened to have a server-wide key.
+  const res = await complete({
+    fastify,
+    orgId,
+    purpose: "rca",
+    maxTokens: 4000,
     messages: [{ role: "user", content: prompt }],
   });
-  const text = res.content.find((c) => c.type === "text");
-  if (!text || text.type !== "text") return null;
-  return text.text.replace(/^```[a-z]*\n?/i, "").replace(/\n?```\s*$/i, "");
+  if (!res) {
+    fastify.log.warn({ orgId, file: fix.file }, "no LLM provider reachable — fix stays proposed, no PR opened");
+    return null;
+  }
+  return res.text.replace(/^```[a-z]*\n?/i, "").replace(/\n?```\s*$/i, "");
 }
 
 /**
@@ -163,7 +171,8 @@ export async function openFixPr(
   fix: FixContext,
   verification?: VerificationResult | null
 ): Promise<PrResult> {
-  if (!config.GITHUB_APP_ID || !config.GITHUB_APP_PRIVATE_KEY || !fix.file || !anthropic) {
+  if (!config.GITHUB_APP_ID || !config.GITHUB_APP_PRIVATE_KEY || !fix.file) {
+    fastify.log.info({ orgId, file: fix.file }, "fix PR skipped — no GitHub App configured or no origin file");
     return { prStatus: "proposed" };
   }
   try {
@@ -180,7 +189,7 @@ export async function openFixPr(
     if (fileData.type !== "file" || !fileData.content) return { prStatus: "proposed" };
     const original = Buffer.from(fileData.content, "base64").toString("utf-8");
 
-    const corrected = await correctFile(original, fix);
+    const corrected = await correctFile(fastify, orgId, original, fix);
     if (!corrected || corrected.trim() === original.trim()) return { prStatus: "proposed" };
 
     // Build a commit on a new branch: base ref → tree → commit → branch → PR.

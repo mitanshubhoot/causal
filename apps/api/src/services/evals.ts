@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { Anthropic } from "@anthropic-ai/sdk";
-import { getDataset, spanSignature, isDiscriminatingSignature, type DatasetItem } from "./datasets.js";
-import { config } from "../config.js";
+import {
+  getDatasetMeta, listAllDatasetItems, spanSignature, isDiscriminatingSignature, type DatasetItem,
+} from "./datasets.js";
+import { complete, resolveForPurpose } from "./llm.js";
 
 /**
  * Offline evals — the half of the loop that proves a fix actually worked.
@@ -14,21 +15,22 @@ import { config } from "../config.js";
  *   * deterministic (always available): recompute each recent production span's
  *     failure signature and check whether the item's signature has come back
  *     since the item was promoted. No model, no API key, no ambiguity.
- *   * LLM (when an Anthropic key is configured): reads the same evidence plus
- *     the item's expectation, and can judge semantic failures — hallucination
- *     and intent drift — that no signature can catch.
+ *   * LLM (when the workspace has a provider configured): reads the same
+ *     evidence plus the item's expectation, and can judge semantic failures —
+ *     hallucination and intent drift — that no signature can catch.
  *
  * Hard evidence wins: if the signature demonstrably recurred, the item fails
  * regardless of what the model thinks.
+ *
+ * Which judge ran is recorded per item and per run. Falling back to the
+ * signature check is a real weakening of a release gate, so it is never
+ * implied — it is written down.
  */
 
-const IS_DEMO = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
-let anthropic: Anthropic | null = null;
-if (!IS_DEMO) anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
-
-// The judge is the same class of task as the detector, so it reuses that model
-// setting rather than introducing an env var nothing else knows about.
-const JUDGE_MODEL = config.DETECTOR_MODEL;
+// The judge is the same class of task as the detector, so it resolves through
+// that purpose rather than introducing a setting nothing else knows about.
+const JUDGE_PURPOSE = "detector" as const;
+const DETERMINISTIC_JUDGE = "deterministic";
 
 /** How far back production traffic is considered "current" behaviour. */
 const EVIDENCE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -115,7 +117,8 @@ export interface EvalResultView {
   /** Which named expectation held, and on what evidence. */
   assertionResults: AssertionResult[];
   latencyMs: number | null;
-  costUsd: number;
+  /** null when no price backs the judged tokens — see `costOrNull`. */
+  costUsd: number | null;
   /** Movement against the previous complete run: fixed | regressed | unchanged. */
   delta: "fixed" | "regressed" | "unchanged";
   spanSignature?: string | null;
@@ -137,7 +140,8 @@ export interface EvalRunView {
   /** The release this run gated — what makes two runs comparable. */
   release: string | null;
   commit: string | null;
-  costUsd: number;
+  /** null when no price backs the judged tokens — see `costOrNull`. */
+  costUsd: number | null;
   total: number;
   passed: number;
   failed: number;
@@ -155,6 +159,17 @@ function toMs(value: unknown): number {
   if (value instanceof Date) return value.getTime();
   const parsed = Date.parse(String(value));
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+/**
+ * `cost_usd` is NOT NULL DEFAULT 0 in the schema and nothing here prices a
+ * token — there is no price table to price it against. A stored 0 therefore
+ * means "not measured", not "free", so report it as null: rendering $0.0000 as
+ * a measurement is exactly the unfounded claim this product exists to kill.
+ */
+function costOrNull(value: unknown): number | null {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function clip(value: string | null | undefined, max: number): string | null {
@@ -400,19 +415,44 @@ Scoring rules:
 Respond with ONLY a JSON object: {"passed": boolean, "score": number between 0 and 1, "reason": one or two sentences citing the evidence}.`;
 }
 
-async function judgeWithLlm(item: DatasetItem, ev: ItemEvidence): Promise<Judgement | null> {
-  if (!anthropic) return null;
-  const res = await anthropic.messages.create({
-    model: JUDGE_MODEL,
-    max_tokens: 500,
+interface LlmJudgement {
+  judgement: Judgement;
+  /** The model that ACTUALLY answered — with BYOK it is not a config default. */
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+}
+
+/**
+ * Ask the workspace's own provider to judge one case. Returns null when no
+ * provider is reachable or the answer is unusable, which drops that item to the
+ * signature check — a real loss of coverage the caller records rather than hides.
+ */
+async function judgeWithLlm(
+  fastify: FastifyInstance,
+  orgId: string,
+  item: DatasetItem,
+  ev: ItemEvidence
+): Promise<LlmJudgement | null> {
+  const res = await complete({
+    fastify,
+    orgId,
+    purpose: JUDGE_PURPOSE,
+    maxTokens: 500,
     messages: [{ role: "user", content: buildJudgePrompt(item, ev) }],
   });
-  const text = res.content.find((c) => c.type === "text");
-  if (!text || text.type !== "text") return null;
-  const match = text.text.match(/\{[\s\S]*\}/);
+  if (!res) return null;
+  const match = res.text.match(/\{[\s\S]*\}/);
   if (!match) return null;
-  const parsed = JudgementSchema.safeParse(JSON.parse(match[0]));
-  return parsed.success ? parsed.data : null;
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(match[0]);
+  } catch {
+    return null; // a judge that returns prose instead of JSON must not fail the run
+  }
+  const parsed = JudgementSchema.safeParse(parsedJson);
+  if (!parsed.success) return null;
+  return { judgement: parsed.data, model: res.model, tokensIn: res.tokensIn, tokensOut: res.tokensOut };
 }
 
 // ── Run ──────────────────────────────────────────────────────────────
@@ -427,8 +467,20 @@ interface PendingResult {
   reason: string;
   assertion_results: ReturnType<typeof json>;
   latency_ms: number;
-  cost_usd: number;
   delta: "fixed" | "regressed" | "unchanged";
+}
+
+/**
+ * What actually judged the run. A gate that names a model when half its cases
+ * fell back to the signature check reports coverage it did not have, so a mixed
+ * run says so — with the split.
+ */
+function describeJudges(counts: Map<string, number>, fallback: string): string {
+  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return fallback;
+  if (entries.length === 1) return entries[0]![0];
+  const total = entries.reduce((sum, [, n]) => sum + n, 0);
+  return entries.map(([judge, n]) => `${judge} (${n}/${total})`).join(" + ").slice(0, 200);
 }
 
 /**
@@ -471,23 +523,37 @@ export async function runEval(
   opts: { datasetId: string; name?: string | null; release?: string | null; commit?: string | null }
 ): Promise<EvalRunView | null> {
   const sql = fastify.pg;
-  const dataset = await getDataset(fastify, orgId, opts.datasetId);
+  const dataset = await getDatasetMeta(fastify, orgId, opts.datasetId);
   if (!dataset) return null;
 
-  const items = dataset.items;
-  const model = anthropic ? JUDGE_MODEL : "deterministic";
+  // Every case, not the newest page of them: a run that judges 500 of 900 cases
+  // and reports 'complete' is a green gate over unjudged regressions.
+  const items = await listAllDatasetItems(fastify, orgId, dataset.id);
   const name = (opts.name ?? `${dataset.name} — ${new Date().toISOString().slice(0, 16).replace("T", " ")}`).slice(0, 200);
 
-  const judgeModel = anthropic ? JUDGE_MODEL : "deterministic";
+  // The judge this workspace would use, resolved before any item runs so a
+  // still-running run names its judge. Corrected below to whatever answered.
+  const planned = await resolveForPurpose(fastify, orgId, JUDGE_PURPOSE);
+  const plannedJudge = planned?.model ?? DETERMINISTIC_JUDGE;
+  if (!planned) {
+    fastify.log.warn(
+      { orgId, datasetId: dataset.id, items: items.length },
+      "no LLM provider reachable — this run scores on signature recurrence only, so semantic failures go unjudged"
+    );
+  }
   const release = clip(opts.release ?? null, 120);
   const commit = clip(opts.commit ?? null, 40);
 
   const runRows = (await sql`
     INSERT INTO eval_runs (org_id, dataset_id, name, status, model, judge_model, release, commit_sha, total)
-    VALUES (${orgId}, ${dataset.id}, ${name}, 'running', ${model}, ${judgeModel}, ${release}, ${commit}, ${items.length})
+    VALUES (${orgId}, ${dataset.id}, ${name}, 'running', ${plannedJudge}, ${plannedJudge}, ${release}, ${commit}, ${items.length})
     RETURNING id, started_at
   `) as Array<{ id: string; started_at: Date }>;
   const run = runRows[0]!;
+
+  // Judge → items it decided. Declared outside the try so a run that blows up
+  // half way still reports what had judged it, rather than the plan.
+  const judgedBy = new Map<string, number>();
 
   try {
     const evidence = items.length ? await collectEvidence(fastify, orgId, items) : null;
@@ -501,14 +567,24 @@ export async function runEval(
       const spanName = failingSpanName(item);
 
       let verdict: Judgement | null = null;
-      if (anthropic) {
+      let judge = DETERMINISTIC_JUDGE;
+      let usage: { tokensIn: number; tokensOut: number } | null = null;
+      if (planned) {
         try {
-          verdict = await judgeWithLlm(item, itemEv);
+          const judged = await judgeWithLlm(fastify, orgId, item, itemEv);
+          if (judged) {
+            verdict = judged.judgement;
+            judge = judged.model;
+            usage = { tokensIn: judged.tokensIn, tokensOut: judged.tokensOut };
+          } else {
+            fastify.log.warn({ itemId: item.id, model: planned.model }, "LLM eval judge unavailable — falling back to signature check");
+          }
         } catch (err) {
           fastify.log.warn({ err, itemId: item.id }, "LLM eval judge failed — falling back to signature check");
         }
       }
       if (!verdict) verdict = deterministicJudgement(itemEv, spanName);
+      judgedBy.set(judge, (judgedBy.get(judge) ?? 0) + 1);
 
       // Hard evidence beats the model: if the exact failure signature came back,
       // the fix did not hold, whatever the judge wrote.
@@ -550,7 +626,6 @@ export async function runEval(
         score: Number(verdict.score.toFixed(3)),
         assertion_results: json(sql, assertions),
         latency_ms: Date.now() - startedAt,
-        cost_usd: 0,
         delta,
         actual: json(sql, {
           signature: itemEv.signature,
@@ -569,7 +644,11 @@ export async function runEval(
                 seenAt: itemEv.latest.seenAt.toISOString(),
               }
             : null,
-          judge: anthropic ? JUDGE_MODEL : "deterministic",
+          judge,
+          // The provider's own token counts. No price table exists to turn them
+          // into money, so they are reported as tokens and cost stays unset.
+          judgeTokensIn: usage?.tokensIn ?? null,
+          judgeTokensOut: usage?.tokensOut ?? null,
         }),
         reason: verdict.reason.slice(0, 2000),
       };
@@ -583,11 +662,13 @@ export async function runEval(
     }
 
     if (results.length > 0) {
+      // cost_usd is left to its column default: nothing here can price a token,
+      // and writing 0 would render as a measured $0.0000.
       await sql`
         INSERT INTO eval_results ${sql(
           results,
           "eval_run_id", "org_id", "dataset_item_id", "passed", "score",
-          "actual", "reason", "assertion_results", "latency_ms", "cost_usd", "delta"
+          "actual", "reason", "assertion_results", "latency_ms", "delta"
         )}
       `;
     }
@@ -595,11 +676,12 @@ export async function runEval(
     const passed = results.filter((r) => r.passed).length;
     const failed = results.length - passed;
     const score = results.length ? Number((results.reduce((a, r) => a + r.score, 0) / results.length).toFixed(3)) : 0;
+    const judgeModel = describeJudges(judgedBy, plannedJudge);
 
     const finishedRows = (await sql`
       UPDATE eval_runs
       SET status = 'complete', total = ${results.length}, passed = ${passed}, failed = ${failed},
-          score = ${score}, finished_at = now()
+          score = ${score}, model = ${judgeModel}, judge_model = ${judgeModel}, finished_at = now()
       WHERE id = ${run.id} AND org_id = ${orgId}
       RETURNING finished_at
     `) as Array<{ finished_at: Date }>;
@@ -616,11 +698,11 @@ export async function runEval(
       datasetName: dataset.name,
       name,
       status: "complete",
-      model,
+      model: judgeModel,
       judgeModel,
       release,
       commit,
-      costUsd: 0,
+      costUsd: null,
       total: results.length,
       passed,
       failed,
@@ -635,17 +717,18 @@ export async function runEval(
     await sql`
       UPDATE eval_runs SET status = 'failed', finished_at = now() WHERE id = ${run.id} AND org_id = ${orgId}
     `.catch(() => undefined);
+    const judgeModel = describeJudges(judgedBy, plannedJudge);
     return {
       id: run.id,
       datasetId: dataset.id,
       datasetName: dataset.name,
       name,
       status: "failed",
-      model,
+      model: judgeModel,
       judgeModel,
       release,
       commit,
-      costUsd: 0,
+      costUsd: null,
       total: items.length,
       passed: 0,
       failed: 0,
@@ -694,7 +777,7 @@ export async function getEvalRun(fastify: FastifyInstance, orgId: string, id: st
     judgeModel: (r["judge_model"] as string | null) ?? null,
     release: (r["release"] as string | null) ?? null,
     commit: (r["commit_sha"] as string | null) ?? null,
-    costUsd: Number(r["cost_usd"] ?? 0),
+    costUsd: costOrNull(r["cost_usd"]),
     total: Number(r["total"]),
     passed: Number(r["passed"]),
     failed: Number(r["failed"]),
@@ -710,7 +793,7 @@ export async function getEvalRun(fastify: FastifyInstance, orgId: string, id: st
       reason: (e["reason"] as string | null) ?? null,
       assertionResults: Array.isArray(e["assertion_results"]) ? (e["assertion_results"] as AssertionResult[]) : [],
       latencyMs: e["latency_ms"] === null || e["latency_ms"] === undefined ? null : Number(e["latency_ms"]),
-      costUsd: Number(e["cost_usd"] ?? 0),
+      costUsd: costOrNull(e["cost_usd"]),
       delta: (e["delta"] as EvalResultView["delta"]) ?? "unchanged",
       spanSignature: (e["span_signature"] as string | null) ?? null,
       title: (e["title"] as string | null) ?? null,
@@ -762,7 +845,7 @@ export async function listEvalRuns(
     judgeModel: (r["judge_model"] as string | null) ?? null,
     release: (r["release"] as string | null) ?? null,
     commit: (r["commit_sha"] as string | null) ?? null,
-    costUsd: Number(r["cost_usd"] ?? 0),
+    costUsd: costOrNull(r["cost_usd"]),
     total: Number(r["total"]),
     passed: Number(r["passed"]),
     failed: Number(r["failed"]),

@@ -11,9 +11,23 @@ function sev(findingSeverity: string | undefined): ObservabilityDemo["severity"]
   return "OK";
 }
 
+/**
+ * The demo shape plus the identifier the demo shape has no field for. Promoting
+ * a finding to a golden case is keyed on the finding id, and dropping it during
+ * the map left the explorer with nothing to send to `POST /findings/:id/promote`.
+ */
+export type LiveDemo = ObservabilityDemo & { findingId: string | null };
+
 /** Map a live `GET /traces/:id` (+ optional `GET /traces/:id/rca`) into the
- *  ObservabilityDemo shape the explorer already renders. */
-export function mapLiveToDemo(detail: Record<string, unknown>, rca: Record<string, unknown> | null): ObservabilityDemo {
+ *  ObservabilityDemo shape the explorer already renders.
+ *
+ *  `findingId` is passed in because `GET /traces/:id` does not return it —
+ *  `fetchFindingId(traceId)` resolves it from the findings list. */
+export function mapLiveToDemo(
+  detail: Record<string, unknown>,
+  rca: Record<string, unknown> | null,
+  findingId?: string | null
+): LiveDemo {
   const finding = detail["finding"] as Record<string, unknown> | null;
   const spans = (detail["spans"] as DemoSpan[]) ?? [];
   const diff = (rca?.["fixDiff"] as { kind: DiffLineKind; text: string }[]) ?? [];
@@ -21,6 +35,10 @@ export function mapLiveToDemo(detail: Record<string, unknown>, rca: Record<strin
   const deletions = diff.filter((d) => d.kind === "del").length;
 
   return {
+    // The caller's id wins; `id` is read too so this keeps working if the trace
+    // endpoint ever carries the finding's id itself. Null when neither exists —
+    // the promote button must stay disabled rather than post a guessed id.
+    findingId: findingId ?? (finding?.["id"] as string | undefined) ?? null,
     incidentId: String(detail["traceId"]),
     service: String(detail["service"] ?? "service"),
     environment: String(detail["environment"] ?? "production"),

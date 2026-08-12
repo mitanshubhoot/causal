@@ -28,11 +28,21 @@ export function TraceActions({
   onOpenFixPr,
   onOpenGraph,
   onPromote,
+  hasGraph,
+  hasPostMortem,
+  promoting = false,
 }: {
   demo: ObservabilityDemo;
   onOpenFixPr: () => void;
   onOpenGraph: () => void;
   onPromote?: () => void;
+  /** A trace with no canned provenance chain must not offer one — the getter
+   *  substitutes a different incident's graph. */
+  hasGraph: boolean;
+  /** Same for the write-up: without this, a trace that never failed generated
+   *  another incident's post-mortem. */
+  hasPostMortem: boolean;
+  promoting?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(true);
@@ -75,10 +85,21 @@ export function TraceActions({
             : { Icon: Clock, className: "text-amber-400" },
         }]
       : []),
-    { key: "graph", label: "Causal graph", hint: "six-layer provenance chain", Icon: Waypoints, tone: "text-indigo-300/80", run: onOpenGraph },
-    { key: "pm", label: "Post-mortem", hint: "generate the write-up", Icon: FileText, tone: "text-zinc-300", href: `/incidents/${demo.incidentId}/postmortem` },
+    ...(hasGraph
+      ? [{ key: "graph", label: "Causal graph", hint: "six-layer provenance chain", Icon: Waypoints, tone: "text-indigo-300/80", run: onOpenGraph }]
+      : []),
+    ...(hasPostMortem
+      ? [{ key: "pm", label: "Post-mortem", hint: "generate the write-up", Icon: FileText, tone: "text-zinc-300", href: `/incidents/${demo.incidentId}/postmortem` }]
+      : []),
     ...(demo.finding && onPromote
-      ? [{ key: "eval", label: "Add to eval set", hint: "make this a golden case", Icon: Database, tone: "text-amber-300/80", run: onPromote }]
+      ? [{
+          key: "eval",
+          label: promoting ? "Adding…" : "Add to eval set",
+          hint: "make this a golden case",
+          Icon: Database,
+          tone: "text-amber-300/80",
+          run: onPromote,
+        }]
       : []),
   ];
 
@@ -87,7 +108,11 @@ export function TraceActions({
       ref={ref}
       className="relative flex items-center gap-1.5 px-3 h-10 border-b border-white/[0.06] flex-shrink-0 min-w-0"
     >
-      {wide ? (
+      {/* A healthy trace has no PR, no graph, no write-up and no finding to
+          promote. Saying so beats an empty strip that looks like a render bug. */}
+      {actions.length === 0 ? (
+        <span className="font-mono text-[11px] text-zinc-600">No findings on this trace — nothing to act on.</span>
+      ) : wide ? (
         actions.map((a) =>
           a.href ? (
             <Link

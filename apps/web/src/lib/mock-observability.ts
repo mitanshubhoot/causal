@@ -707,7 +707,10 @@ const DEMOS: Record<string, ObservabilityDemo> = Object.fromEntries(
   [...INCIDENTS, ...HEALTHY].map((d) => [d.incidentId, d])
 );
 
-/** Returns the trace for an id (incident or healthy), defaulting to the featured incident. */
+/** Returns the trace for an id (incident or healthy), defaulting to the featured
+ *  incident. Call `hasObservabilityDemo` FIRST for any id that came from a URL:
+ *  the default means an unknown id would otherwise render the featured
+ *  incident's trace under the id the visitor asked for. */
 export function getObservabilityDemo(incidentId: string): ObservabilityDemo {
   return DEMOS[incidentId] ?? DEMO_I4;
 }
@@ -726,6 +729,12 @@ export interface DetectorEntity {
   enabled: boolean;
   findings: { traceId: string; findingId: string; timestamp: string; title: string; severity: string; confidence: number; service: string; resolved?: boolean }[];
   runs: { traceId: string; timestamp: string; identified: boolean; service: string }[];
+  /** Totals as the source reported them. The live list endpoint returns counts
+   *  without the rows, so the list has to render these rather than measure the
+   *  (empty) arrays above. */
+  openFindings?: number;
+  totalFindings?: number;
+  totalRuns?: number;
 }
 
 const DETECTOR_DEFS: { name: string; type: DetectorType; description: string }[] = [
@@ -807,7 +816,18 @@ export function getDetectors(): DetectorEntity[] {
       })),
     ];
 
-    return { id: `det-${di}`, name: def.name, type: def.type, description: def.description, enabled: true, findings, runs };
+    return {
+      id: `det-${di}`,
+      name: def.name,
+      type: def.type,
+      description: def.description,
+      enabled: true,
+      findings,
+      runs,
+      openFindings: findings.filter((f) => !("resolved" in f && f.resolved)).length,
+      totalFindings: findings.length,
+      totalRuns: runs.length,
+    };
   });
 }
 
@@ -815,6 +835,9 @@ export function getDetector(name: string): DetectorEntity | undefined {
   return getDetectors().find((d) => d.name === name);
 }
 
+/** Whether a trace exists for this id at all — the gate a route must pass
+ *  before calling `getObservabilityDemo`, so an unknown id 404s instead of
+ *  quietly rendering the featured incident. */
 export function hasObservabilityDemo(incidentId: string): boolean {
   return incidentId in DEMOS;
 }

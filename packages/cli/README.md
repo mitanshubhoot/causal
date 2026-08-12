@@ -5,13 +5,37 @@ detectors, ask questions about a run, check that your setup is sound, and genera
 tells a coding agent how to instrument your repo.
 
 ```bash
-pnpm add -g @causal/cli      # or: npm i -g @causal/cli
 causal login
 causal traces list
 causal traces get tr_9f2c1a
 ```
 
 Requires Node 20+ (the CLI uses global `fetch`).
+
+## Install
+
+> `@causal/cli` is not yet published to npm, so build it from a checkout rather than
+> `npm i -g @causal/cli`.
+
+```bash
+git clone https://github.com/mitanshubhoot/causal
+cd causal && pnpm install && pnpm --filter @causal/cli build
+```
+
+`dist/index.js` is executable and carries a `#!/usr/bin/env node` shebang, so run it directly:
+
+```bash
+/path/to/causal/packages/cli/dist/index.js traces list
+```
+
+To get `causal` on your `PATH`, symlink that file into a directory already on it:
+
+```bash
+ln -s /path/to/causal/packages/cli/dist/index.js ~/.local/bin/causal
+```
+
+Inside this repo, `pnpm --filter @causal/cli dev traces list` runs it from source via tsx —
+note there is no `--` before the arguments, pnpm forwards them as-is.
 
 ---
 

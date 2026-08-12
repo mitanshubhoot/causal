@@ -1,20 +1,50 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFastifyStub, type Row } from "./pg-stub.js";
 import { runEval } from "../evals.js";
 import { spanSignature } from "../datasets.js";
 
 /**
  * An eval run's job is to turn evidence into a defensible verdict. These tests
- * pin the three things a user actually relies on:
+ * pin the four things a user actually relies on:
  *
  *   1. an assertion that fails makes the CASE fail, and says which one and why
  *   2. `delta` reports movement against the previous run — and never invents a
  *      regression for a case that has no baseline
- *   3. the run records what it gated (release, commit) and who judged it
+ *   3. the run records what it gated (release, commit) and who ACTUALLY judged it
+ *   4. every case in the dataset is judged before the run claims `complete`
  *
- * The signature evaluator is deterministic with no API key configured, so these
- * run without a model.
+ * The signature evaluator is deterministic with no provider configured, which is
+ * the default here, so most of these run without a model.
  */
+
+/**
+ * Mock the BYOK layer, not a provider SDK. `runEval` resolves its judge per
+ * workspace through `llm.ts`, so that is the real seam — and mocking it keeps
+ * these tests true whichever provider an org runs on. `model: null` is how "no
+ * provider is reachable" is signalled, which drops the run to the signature judge.
+ */
+const llm = vi.hoisted(() => ({
+  model: null as string | null,
+  reply: "",
+  calls: 0,
+}));
+
+vi.mock("../llm.js", () => ({
+  resolveForPurpose: async () =>
+    llm.model ? { provider: "anthropic", model: llm.model, source: "org" } : null,
+  complete: async () => {
+    llm.calls++;
+    return llm.model
+      ? { text: llm.reply, model: llm.model, provider: "anthropic", tokensIn: 120, tokensOut: 40 }
+      : null;
+  },
+}));
+
+beforeEach(() => {
+  llm.model = null;
+  llm.reply = "";
+  llm.calls = 0;
+});
 
 const SIGNATURE = spanSignature({
   name: "tool.resolve_rollout_flag",
@@ -37,35 +67,44 @@ interface Options {
   /** How this case did in the previous complete run (undefined → no baseline). */
   previouslyPassed?: boolean;
   assertions?: unknown[];
+  /** The dataset's golden cases. Served page by page, like the real table. */
+  items?: Row[];
+}
+
+function goldenItem(id: string, assertions?: unknown[]): Row {
+  return {
+    id,
+    dataset_id: DATASET_ID,
+    trace_id: "t-1",
+    finding_id: null,
+    title: "Checkout survives a missing rollout flag",
+    input: { failingSpan: { name: "tool.resolve_rollout_flag" } },
+    expected: { behaviour: "degrades to legacy" },
+    span_signature: SIGNATURE,
+    assertions: assertions ?? [
+      { id: "a1", kind: "must_not_raise", description: "resolver does not raise", target: "span.status != error" },
+    ],
+    tags: ["rollout"],
+    severity: "critical",
+    difficulty: "regression",
+    notes: null,
+    created_at: PROMOTED_AT,
+  };
 }
 
 function stub(opts: Options = {}) {
   const spans = opts.spans ?? [];
+  const items = opts.items ?? [goldenItem(ITEM_ID, opts.assertions)];
   return createFastifyStub((q): Row[] => {
-    // getDataset → the dataset row
+    // getDatasetMeta → the dataset row and its true item count
     if (/FROM datasets/.test(q.text) && /SELECT id, name/.test(q.text)) {
-      return [{ id: DATASET_ID, name: "checkout-regressions", description: null, created_at: PROMOTED_AT }];
+      return [{ id: DATASET_ID, name: "checkout-regressions", description: null, created_at: PROMOTED_AT, item_count: items.length }];
     }
-    // getDataset → its items
+    // listAllDatasetItems → one page of golden cases (… LIMIT ? OFFSET ?)
     if (/FROM dataset_items/.test(q.text)) {
-      return [{
-        id: ITEM_ID,
-        dataset_id: DATASET_ID,
-        trace_id: "t-1",
-        finding_id: null,
-        title: "Checkout survives a missing rollout flag",
-        input: { failingSpan: { name: "tool.resolve_rollout_flag" } },
-        expected: { behaviour: "degrades to legacy" },
-        span_signature: SIGNATURE,
-        assertions: opts.assertions ?? [
-          { id: "a1", kind: "must_not_raise", description: "resolver does not raise", target: "span.status != error" },
-        ],
-        tags: ["rollout"],
-        severity: "critical",
-        difficulty: "regression",
-        notes: null,
-        created_at: PROMOTED_AT,
-      }];
+      const offset = Number(q.values[q.values.length - 1] ?? 0);
+      const limit = Number(q.values[q.values.length - 2] ?? items.length);
+      return items.slice(offset, offset + limit);
     }
     // previousVerdicts. Matched BEFORE the eval_runs branch below: this query
     // selects from eval_results but contains an `eval_runs … LIMIT 1` subquery,
@@ -226,5 +265,52 @@ describe("runEval — run identity", () => {
     const run = await runEval(h.fastify, "org1", { datasetId: DATASET_ID });
     expect(run?.release).toBeNull();
     expect(run?.commit).toBeNull();
+  });
+
+  it("names the model that ACTUALLY judged, whichever provider the workspace runs on", async () => {
+    llm.model = "gemini-2.0-flash";
+    llm.reply = '{"passed": true, "score": 0.9, "reason": "the resolver degraded to legacy in every run"}';
+    const h = stub({ spans: [okSpan] });
+    const run = await runEval(h.fastify, "org1", { datasetId: DATASET_ID });
+
+    expect(llm.calls).toBe(1);
+    expect(run?.judgeModel).toBe("gemini-2.0-flash");
+    const actual = (insertedResults(h)[0]?.["actual"] as { __json: Record<string, unknown> }).__json;
+    expect(actual["judge"]).toBe("gemini-2.0-flash");
+    // Real usage from the provider — the evidence behind any future cost claim.
+    expect(actual["judgeTokensIn"]).toBe(120);
+  });
+
+  it("records `deterministic` when no provider is reachable, so the gate never implies a semantic judge it did not run", async () => {
+    const h = stub({ spans: [okSpan] });
+    const run = await runEval(h.fastify, "org1", { datasetId: DATASET_ID });
+
+    expect(llm.calls).toBe(0);
+    expect(run?.judgeModel).toBe("deterministic");
+    const actual = (insertedResults(h)[0]?.["actual"] as { __json: Record<string, unknown> }).__json;
+    expect(actual["judge"]).toBe("deterministic");
+    expect(actual["judgeTokensIn"]).toBeNull();
+  });
+
+  it("reports cost as null rather than $0.0000, which nothing here measured", async () => {
+    const h = stub({ spans: [okSpan] });
+    const run = await runEval(h.fastify, "org1", { datasetId: DATASET_ID });
+    expect(run?.costUsd).toBeNull();
+    // Never written as 0 either — the column default carries "not measured".
+    expect(Object.keys(insertedResults(h)[0] ?? {})).not.toContain("cost_usd");
+  });
+});
+
+describe("runEval — coverage", () => {
+  it("judges every case, not just the newest page, before claiming `complete`", async () => {
+    // One case past the page size: a paged run that stopped at the first page
+    // would report a clean 500 and drop the oldest, longest-standing case.
+    const items = Array.from({ length: 501 }, (_, i) => goldenItem(`item-${i}`));
+    const h = stub({ spans: [okSpan], items });
+    const run = await runEval(h.fastify, "org1", { datasetId: DATASET_ID });
+
+    expect(run?.status).toBe("complete");
+    expect(run?.total).toBe(501);
+    expect(insertedResults(h)).toHaveLength(501);
   });
 });

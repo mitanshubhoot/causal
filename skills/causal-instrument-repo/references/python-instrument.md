@@ -4,11 +4,21 @@ Runnable recipes. Every snippet is additive: delete it and the app behaves ident
 
 ## 1. Install
 
+`causal-sdk` is **not yet published to PyPI**. Install it from a checkout by path:
+
 ```bash
-pip install causal-sdk        # or: uv add causal-sdk / poetry add causal-sdk
+git clone https://github.com/mitanshubhoot/causal
+pip install -e /path/to/causal/packages/sdk-python/   # or: uv pip install -e <path>
 ```
 
-Add `causal-sdk` to `requirements.txt` or `pyproject.toml` dependencies. Environment:
+Pin it the same way in your project — a local path or VCS reference in
+`requirements.txt` / `pyproject.toml`, not a version range:
+
+```
+causal-sdk @ file:///path/to/causal/packages/sdk-python
+```
+
+Environment:
 
 ```bash
 CAUSAL_API_KEY=causal_...            # required

@@ -12,6 +12,16 @@ import type { CausalNode, CausalEdge, TraceGraph, RootCause } from "@causal/type
 import { config } from "../config.js";
 import { detectCascade, type CascadeAnalysis } from "./cascade-detector.js";
 
+/**
+ * A root cause we identified but could not explain. RootCause types both fields
+ * as string, which cannot express "we have no explanation" — and the difference
+ * between "" and null is the difference between a blank claim and an admission.
+ */
+type UnexplainedRootCause = Omit<RootCause, "explanation" | "counterfactual"> & {
+  explanation: string | null;
+  counterfactual: string | null;
+};
+
 export async function assembleTraceGraph(
   fastify: FastifyInstance,
   rootNodeId: string,
@@ -155,15 +165,20 @@ export async function assembleTraceGraph(
   );
 
   // ── 4. Call RCA service for LLM explanations ─────────────────────
-  let rootCauses: RootCause[] = rootCauseCandidates.map((c) => ({
+  // The RCA service is the only source of an explanation, and it is not
+  // deployed anywhere yet — so this is the normal path. An empty string renders
+  // as an answer beside the confidence pill; null is what lets the UI say the
+  // explanation is unavailable instead of showing nothing.
+  let rootCauses: UnexplainedRootCause[] = rootCauseCandidates.map((c) => ({
     nodeId: c.nodeId,
     layer: c.layer,
     probability: c.probability,
-    explanation: "",
-    counterfactual: "",
+    explanation: null,
+    counterfactual: null,
     evidenceEdgeIds: c.evidenceEdgeIds,
   }));
 
+  let explained = true;
   try {
     rootCauses = await callRcaService(fastify, {
       traceId,
@@ -174,17 +189,24 @@ export async function assembleTraceGraph(
       candidates: rootCauseCandidates,
     });
   } catch (err) {
+    explained = false;
     fastify.log.warn({ err }, "RCA service unavailable — returning candidates without explanations");
   }
 
-  const traceGraph: TraceGraph = {
+  // A graph whose root causes carry no explanation is not a completed analysis.
+  // trace_graphs.status is CHECK-constrained to assembling|complete|failed
+  // (001_init.sql), so 'failed' is the only value that says so — and it also
+  // keeps the cache lookup above from serving this back as a finished result.
+  const status = explained ? "complete" : "failed";
+
+  const traceGraph: Omit<TraceGraph, "rootCauses"> & { rootCauses: UnexplainedRootCause[] } = {
     id: traceId,
     rootNodeId,
     nodes,
     edges,
     rootCauses,
     criticalPath,
-    status: "complete",
+    status,
     confidence: rootCauses[0]?.probability,
     createdAt: Date.now(),
     completedAt: Date.now(),
@@ -206,7 +228,7 @@ export async function assembleTraceGraph(
       ${nodes.map((n) => n.id).filter((id): id is string => id != null)},
       ${criticalPath.filter((id): id is string => id != null)},
       ${JSON.stringify(rootCauses)},
-      'complete',
+      ${status},
       NOW(),
       NOW()
     )

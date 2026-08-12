@@ -727,7 +727,7 @@ function HeroSection() {
     "Git context: each span linked to file, line, and commit",
     "LLM-as-judge detects failures, alerts Slack & email",
     "Agentic RCA ties the failure to the exact commit",
-    "Auto-opens a verified fix PR on GitHub",
+    "Auto-opens a fix PR on GitHub with a causal-replay check",
   ];
 
   return (
@@ -778,7 +778,7 @@ function HeroSection() {
         >
           AI-native observability and self-healing for AI agents. Add one decorator: Causal
           traces every LLM and tool call, an LLM judge catches failures the moment they happen,
-          and an AI agent root-causes each one to the exact commit — then opens a verified fix PR.
+          and an AI agent root-causes each one to the exact commit — then opens the fix PR.
         </motion.p>
 
         {/* Numbered capability list */}
@@ -889,7 +889,7 @@ function StatsSection() {
     { value: 1, label: "Decorator to instrument", prefix: "", suffix: "", decimals: 0 },
     { value: 6, label: "Layers, intent → incident", prefix: "", suffix: "", decimals: 0 },
     { value: 4, label: "Failure classes auto-detected", prefix: "", suffix: "", decimals: 0 },
-    { value: 1, label: "Failing span → verified fix", prefix: "", suffix: " PR", decimals: 0 },
+    { value: 1, label: "Failing span → fix", prefix: "", suffix: " PR", decimals: 0 },
   ];
 
   return (
@@ -1352,8 +1352,8 @@ function BenefitSections() {
         num="03"
         tag="[ 03 / HEAL ]"
         headline={"Root-caused\nto the commit.\nFixed in a PR."}
-        sub="An AI agent clones your repo in a sandbox, correlates the failing span to the exact commit and git history, and explains the cause with a counterfactual. Then it writes the fix and opens a verified GitHub PR."
-        body="Every pull request ships with a diff, a description, and a passing causal-replay check that proves the failure is gone."
+        sub="An AI agent clones your repo in a sandbox, correlates the failing span to the exact commit and git history, and explains the cause with a counterfactual. Then it writes the fix and opens the GitHub PR."
+        body="Every pull request ships with a diff, a description, and a causal-replay check that runs your tests against the patch when sandbox verification is enabled — and says so plainly when it hasn't."
         cta="EXPLORE A LIVE INCIDENT"
         ctaHref={`/incidents/${FEATURED_INCIDENT_ID}`}
         visual={<BenefitPostmortemVisual />}
@@ -1404,8 +1404,8 @@ function HowItWorksSection() {
       num: "04",
       icon: Activity,
       title: "It opens the fix PR",
-      description: "Causal writes the fix and opens a verified GitHub pull request — diff, description, and a passing causal-replay check that proves the failure is gone.",
-      code: `gh pr: fix(agent): range-parse dates\n✓ checks passing\n✓ causal-replay: incident resolved`,
+      description: "Causal writes the fix and opens a GitHub pull request — diff, description, and a causal-replay check that runs your tests against the patch when sandbox verification is enabled.",
+      code: `gh pr: fix(agent): range-parse dates\n✓ causal-replay: suite passed in sandbox`,
     },
   ];
 
@@ -1850,7 +1850,7 @@ function CTASection() {
 
         <motion.p variants={fadeUp} className="text-[16px] text-white/30 mb-14 leading-relaxed max-w-md mx-auto font-light">
           Add one decorator and Causal takes it from there — tracing every run, catching the
-          failures, and opening the verified fix PR. Explore a live incident, no signup required.
+          failures, and opening the fix PR. Explore a live incident, no signup required.
         </motion.p>
 
         <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -1875,43 +1875,32 @@ function CTASection() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function Footer() {
+  // Every link here resolves to something that exists — a route in this app or a
+  // path in the repo. The Blog/Status/Careers/Privacy columns were href="#": a
+  // footer of links that go nowhere reads as an unfinished product, so they are
+  // gone rather than stubbed.
+  const REPO = "https://github.com/mitanshubhoot/causal";
   const columns = [
     {
       heading: "PRODUCT",
       links: [
-        { label: "Incidents", href: "/incidents" },
         { label: "Live Demo", href: `/incidents/${FEATURED_INCIDENT_ID}` },
-        { label: "GitHub", href: "https://github.com/mitanshubhoot/causal" },
-      ],
-    },
-    {
-      heading: "INTEGRATIONS",
-      links: [
-        { label: "LangGraph", href: "#" },
-        { label: "LangChain", href: "#" },
-        { label: "PagerDuty", href: "#" },
-        { label: "Sentry", href: "#" },
-        { label: "Datadog", href: "#" },
+        { label: "Incidents", href: "/incidents" },
+        { label: "Dashboard", href: "/dashboard" },
+        { label: "Detectors", href: "/detectors" },
+        { label: "Eval sets", href: "/evals" },
+        { label: "Integrations", href: "/#integrations" },
       ],
     },
     {
       heading: "RESOURCES",
       links: [
-        { label: "Documentation", href: "#" },
-        { label: "Python SDK", href: "#" },
-        { label: "API Reference", href: "#" },
-        { label: "Blog", href: "#" },
-        { label: "Status", href: "#" },
-      ],
-    },
-    {
-      heading: "COMPANY",
-      links: [
-        { label: "About", href: "#" },
-        { label: "Careers", href: "#" },
-        { label: "Contact", href: "#" },
-        { label: "Privacy", href: "#" },
-        { label: "Terms", href: "#" },
+        { label: "Documentation", href: `${REPO}#readme` },
+        { label: "Architecture", href: `${REPO}/blob/main/docs/CAUSAL_V2_ARCHITECTURE.md` },
+        { label: "Python SDK", href: `${REPO}/tree/main/packages/sdk-python` },
+        { label: "TypeScript SDK", href: `${REPO}/tree/main/packages/sdk-typescript` },
+        { label: "Agent Skills", href: `${REPO}/tree/main/skills` },
+        { label: "GitHub", href: REPO },
       ],
     },
   ];
@@ -1919,8 +1908,8 @@ function Footer() {
   return (
     <footer className="border-t border-white/[0.06] pt-16 pb-10 px-8">
       <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-10 mb-16">
-          <div className="col-span-2 md:col-span-1">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-10 mb-16">
+          <div className="col-span-2">
             <Link href="/" className="flex items-center gap-3 mb-5">
               <LogoMark size={24} />
               <span className="text-[14px] font-medium text-white">Causal</span>
@@ -1934,7 +1923,12 @@ function Footer() {
               <p className="font-mono text-[10px] tracking-[0.2em] text-white/25 mb-5">{heading}</p>
               <div className="flex flex-col gap-3">
                 {links.map(({ label, href }) => (
-                  <Link key={label} href={href} className="text-[13px] text-white/25 hover:text-white/60 transition-colors duration-300">
+                  <Link
+                    key={label}
+                    href={href}
+                    {...(href.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})}
+                    className="text-[13px] text-white/25 hover:text-white/60 transition-colors duration-300"
+                  >
                     {label}
                   </Link>
                 ))}
@@ -1947,11 +1941,14 @@ function Footer() {
             © 2026 CAUSAL. ALL RIGHTS RESERVED.
           </p>
           <div className="flex items-center gap-6">
-            {["TWITTER", "GITHUB", "DISCORD"].map((s) => (
-              <Link key={s} href="#" className="font-mono text-[11px] tracking-[0.15em] text-white/15 hover:text-white/40 transition-colors duration-300">
-                {s}
-              </Link>
-            ))}
+            <Link
+              href={REPO}
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono text-[11px] tracking-[0.15em] text-white/15 hover:text-white/40 transition-colors duration-300"
+            >
+              GITHUB
+            </Link>
           </div>
         </div>
       </div>

@@ -237,15 +237,72 @@ export async function createDataset(
   };
 }
 
-/** One dataset with its golden items and its most recent eval run. */
-export async function getDataset(fastify: FastifyInstance, orgId: string, id: string): Promise<DatasetWithItems | null> {
+/**
+ * The dataset row and its TRUE item count, without loading the items.
+ *
+ * `listDatasets` counts with COUNT(*), so deriving the count from a capped item
+ * list here made the two endpoints disagree about the size of the same dataset.
+ */
+export async function getDatasetMeta(fastify: FastifyInstance, orgId: string, id: string): Promise<Dataset | null> {
   const rows = (await fastify.pg`
-    SELECT id, name, description, created_at FROM datasets
+    SELECT id, name, description, created_at,
+           (SELECT COUNT(*) FROM dataset_items i
+             WHERE i.dataset_id = datasets.id AND i.org_id = datasets.org_id) AS item_count
+    FROM datasets
     WHERE id = ${id} AND org_id = ${orgId} LIMIT 1
   `) as Array<Record<string, unknown>>;
   const d = rows[0];
   if (!d) return null;
+  return {
+    id: d["id"] as string,
+    name: d["name"] as string,
+    description: (d["description"] as string | null) ?? null,
+    itemCount: Number(d["item_count"] ?? 0),
+    createdAt: d["created_at"],
+  };
+}
 
+/** Page size for the unbounded item fetch — one round trip per 500 cases. */
+const ITEM_PAGE = 500;
+
+/**
+ * EVERY golden case in a dataset, oldest first.
+ *
+ * `getDataset` caps its item list for the UI; an eval run must not inherit that
+ * cap — a gate that drops the oldest, longest-standing regressions and then
+ * reports `complete` is worse than no gate. Paged so one dataset cannot pull an
+ * unbounded result set in a single statement, and ordered ascending so a case
+ * promoted while a run is in flight lands after the cursor instead of shifting
+ * the window under it.
+ */
+export async function listAllDatasetItems(
+  fastify: FastifyInstance,
+  orgId: string,
+  datasetId: string
+): Promise<DatasetItem[]> {
+  const items: DatasetItem[] = [];
+  for (let offset = 0; ; offset += ITEM_PAGE) {
+    const rows = (await fastify.pg`
+      SELECT id, dataset_id, trace_id, finding_id, title, input, expected, span_signature,
+             assertions, tags, severity, difficulty, notes, created_at
+      FROM dataset_items
+      WHERE dataset_id = ${datasetId} AND org_id = ${orgId}
+      ORDER BY created_at ASC, id ASC
+      LIMIT ${ITEM_PAGE} OFFSET ${offset}
+    `) as Array<Record<string, unknown>>;
+    items.push(...rows.map(mapItem));
+    if (rows.length < ITEM_PAGE) return items;
+  }
+}
+
+/** One dataset with its golden items and its most recent eval run. */
+export async function getDataset(fastify: FastifyInstance, orgId: string, id: string): Promise<DatasetWithItems | null> {
+  const dataset = await getDatasetMeta(fastify, orgId, id);
+  if (!dataset) return null;
+
+  // Read path: the newest 500 cases are what the UI renders. `itemCount` above
+  // still reports the real total, and an eval run reads every case through
+  // listAllDatasetItems.
   const items = (await fastify.pg`
     SELECT id, dataset_id, trace_id, finding_id, title, input, expected, span_signature,
            assertions, tags, severity, difficulty, notes, created_at
@@ -265,11 +322,7 @@ export async function getDataset(fastify: FastifyInstance, orgId: string, id: st
   const r = runs[0];
 
   return {
-    id: d["id"] as string,
-    name: d["name"] as string,
-    description: (d["description"] as string | null) ?? null,
-    itemCount: items.length,
-    createdAt: d["created_at"],
+    ...dataset,
     items: items.map(mapItem),
     lastRun: r
       ? {

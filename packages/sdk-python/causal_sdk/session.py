@@ -16,12 +16,28 @@ import time
 from pathlib import Path
 from typing import Any
 
-try:
-    from uuidv7 import uuidv7
-except ImportError:
-    import uuid
-    def uuidv7() -> str:
-        return str(uuid.uuid4())
+import os
+import uuid
+
+
+def uuidv7() -> str:
+    """A time-ordered UUID, per RFC 9562 §5.7.
+
+    Implemented here rather than taken as a dependency: the TypeScript SDK uses
+    the npm `uuidv7` package, and this file used to declare a PyPI package of
+    the same name that does not exist — which made `pip install` fail outright.
+    The fallback it shipped with degraded to uuid4, quietly losing the property
+    the id format exists for: ids that sort by creation time, so a trace's spans
+    stay in order without a separate sequence column.
+
+    Layout: 48-bit millisecond timestamp | version 7 | 12 random | variant | 62 random.
+    """
+    ts = int(time.time() * 1000) & 0xFFFF_FFFF_FFFF
+    rand = int.from_bytes(os.urandom(10), "big")
+    rand_a = (rand >> 62) & 0xFFF                      # 12 bits
+    rand_b = rand & 0x3FFF_FFFF_FFFF_FFFF              # 62 bits
+    value = (ts << 80) | (0x7 << 76) | (rand_a << 64) | (0b10 << 62) | rand_b
+    return str(uuid.UUID(int=value))
 
 from .models import CreateNode, ContextSnapshot
 

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { complete } from "./llm.js";
 import { getTrace } from "./traces.js";
 import { openFixPr, type PrResult } from "./github-pr.js";
@@ -49,6 +50,30 @@ interface RcaResult {
   fixDescription: string;
   fixDiff: DiffLine[];
 }
+
+/**
+ * The model's JSON is untrusted: a confidence of 95 overflows
+ * confidence NUMERIC(4,3) and "high" is not a number at all. Either one raises
+ * on the INSERT below, which discards the git evidence and the sandbox
+ * verification along with it. Validate and clamp before anything reaches
+ * Postgres; a field we cannot make sense of stays null so the caller's own
+ * fallback applies rather than an invented number.
+ */
+const RcaJsonSchema = z.object({
+  summary: z.string().optional(),
+  explanation: z.string().optional(),
+  counterfactual: z.string().optional(),
+  // null/"" mean the model declined to score, and Number() would turn both into
+  // a confident-looking 0 — leave it null so the caller's fallback applies.
+  confidence: z
+    .preprocess((v) => (v === null || v === "" ? undefined : v), z.coerce.number().catch(NaN))
+    .transform((n) => (Number.isFinite(n) ? Math.max(0, Math.min(1, n > 1 ? n / 100 : n)) : null)),
+  fixTitle: z.string().optional(),
+  fixDescription: z.string().optional(),
+  fixDiff: z
+    .array(z.object({ kind: z.enum(["add", "del", "ctx", "meta"]).catch("ctx"), text: z.string() }))
+    .catch([]),
+});
 
 function heuristicRca(trace: TraceView, span: SpanView): RcaResult {
   const git = span.git ?? null;
@@ -127,12 +152,15 @@ Produce ONLY a JSON object: {"summary": short root-cause, "explanation": 2-3 sen
   if (!res) return null;
   const match = res.text.match(/\{[\s\S]*\}/);
   if (!match) return null;
-  let parsed: Partial<RcaResult>;
+  let parsedJson: unknown;
   try {
-    parsed = JSON.parse(match[0]) as Partial<RcaResult>;
+    parsedJson = JSON.parse(match[0]);
   } catch {
     return null; // prose instead of JSON must not throw
   }
+  const validated = RcaJsonSchema.safeParse(parsedJson);
+  if (!validated.success) return null;
+  const parsed = validated.data;
   const built: RcaResult = {
     summary: parsed.summary ?? trace.finding?.title ?? "Root cause",
     commit: git?.commit ?? null,
@@ -144,7 +172,7 @@ Produce ONLY a JSON object: {"summary": short root-cause, "explanation": 2-3 sen
     hopsUpstream: 1,
     fixTitle: parsed.fixTitle ?? `fix(${trace.service}): guard ${span.name}`,
     fixDescription: parsed.fixDescription ?? "",
-    fixDiff: Array.isArray(parsed.fixDiff) ? parsed.fixDiff : [],
+    fixDiff: parsed.fixDiff,
   };
   return { rca: built, model: res.model };
 }

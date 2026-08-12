@@ -40,6 +40,19 @@ export interface IngestTrace {
   spans: IngestSpan[];
 }
 
+/**
+ * Collapse repeated span ids — last write wins. One payload carrying the same
+ * id twice is normal (an exporter that emits both scopeSpans and
+ * instrumentationLibrarySpans), and it would otherwise raise 23505 on the bulk
+ * insert, or 21000 on the upsert path because ON CONFLICT cannot touch a row
+ * twice in one statement — losing the whole trace either way.
+ */
+export function dedupeSpans(spans: IngestSpan[]): IngestSpan[] {
+  const byId = new Map<string, IngestSpan>();
+  for (const s of spans) byId.set(s.id, s);
+  return byId.size === spans.length ? spans : [...byId.values()];
+}
+
 function rollupStatus(spans: IngestSpan[]): "ok" | "warn" | "error" {
   if (spans.some((s) => s.status === "error")) return "error";
   if (spans.some((s) => s.status === "warn")) return "warn";
@@ -51,7 +64,11 @@ function rollupStatus(spans: IngestSpan[]): "ok" | "warn" | "error" {
  * replaces its spans (spans cascade-delete with the trace row).
  */
 export async function ingestTrace(fastify: FastifyInstance, orgId: string, t: IngestTrace): Promise<{ traceId: string; spanCount: number }> {
-  const spans = t.spans ?? [];
+  const incoming = t.spans ?? [];
+  const spans = dedupeSpans(incoming);
+  if (spans.length < incoming.length) {
+    fastify.log.warn({ traceId: t.traceId, dropped: incoming.length - spans.length }, "collapsed duplicate span ids");
+  }
   const root = spans.find((s) => !s.parentId);
   const status = rollupStatus(spans);
   // Guard against an invalid startedAt string reaching the INSERT.

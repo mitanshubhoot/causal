@@ -17,7 +17,7 @@ env:
 
 jobs:
   build:
-    name: type-check · test · build
+    name: lint · type-check · test · build
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -53,6 +53,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # First because it needs no build and fails in seconds.
+      - name: Lint
+        run: pnpm lint ||
+          { echo "::error::eslint failed — run 'pnpm lint' locally to reproduce"; exit 1; }
+
       - name: Type-check
         run: pnpm exec turbo run type-check
 
@@ -61,3 +66,104 @@ jobs:
 
       - name: Build
         run: pnpm exec turbo run build
+
+  migrate:
+    name: postgres migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # The regression test for the migration chain: 001..010 must apply in order
+    # against an empty database, and re-applying must be a no-op. A bug here is
+    # invisible to type-check and tests, which never touch SQL.
+    services:
+      postgres:
+        # pgvector, not plain postgres: 001_init.sql creates a vector(1536)
+        # column, so the extension has to exist or the very first migration
+        # fails. TimescaleDB is absent here and migrate.js skips it by design.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: causal
+          POSTGRES_USER: causal
+          POSTGRES_PASSWORD: causal_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U causal -d causal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # The repo default is port 5433 (docker-compose maps 5433→5432); the
+      # service container publishes 5432 directly, so this must be explicit.
+      POSTGRES_URL: postgres://causal:causal_dev_password@localhost:5432/causal
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Locate the pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      # migrate.js imports the root `postgres` devDependency.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations
+        run: pnpm db:migrate ||
+          { echo "::error::migration chain failed against an empty database — see the '✗ failed' line above"; exit 1; }
+
+      # Catches a migration that is not safe to re-run, which is how a
+      # half-applied chain corrupts an existing deployment.
+      - name: Re-apply migrations (must be a no-op)
+        run: pnpm db:migrate ||
+          { echo "::error::migrations are not idempotent — the second run must skip everything"; exit 1; }
+
+  python:
+    name: python sdk
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # The regression test for packages/sdk-python's packaging: a missing README
+    # or an unresolvable dependency breaks `pip install` for every contributor
+    # and takes the `causal` console script with it. Nothing else in CI is
+    # Python, so this failure mode shipped unnoticed once already.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the SDK
+        run: pip install -e packages/sdk-python/ ||
+          { echo "::error::pip install of packages/sdk-python failed — check pyproject.toml metadata and dependencies"; exit 1; }
+
+      - name: Import it
+        run: python -c "import causal_sdk; from causal_sdk import CausalTracer, observe, CausalClient; print(causal_sdk.__version__)" ||
+          { echo "::error::causal_sdk installed but does not import"; exit 1; }
+
+      # `causal init` is step 7 of the README's local setup; it is unreachable
+      # if the console script was not registered.
+      - name: Check the console script
+        run: causal --help > /dev/null ||
+          { echo "::error::the 'causal' console script is missing from the install"; exit 1; }

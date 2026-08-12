@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, notFound } from "next/navigation";
 import {
   Search, ChevronDown, X, Waypoints, ScanSearch,
   ListTree, GanttChart, ShieldAlert, PanelLeft, Sparkles,
+  CheckCircle2, AlertTriangle, Database,
 } from "lucide-react";
 import { ProvenanceExplorer } from "@/components/ProvenanceExplorer";
-import { getMockTrace } from "@/lib/mock-data";
-import { getObservabilityDemo, getTraceList, getAllDemos } from "@/lib/mock-observability";
+import { getMockTrace, isMockIncidentId } from "@/lib/mock-data";
+import { getObservabilityDemo, getTraceList, getAllDemos, hasObservabilityDemo } from "@/lib/mock-observability";
 import type { ObservabilityDemo, IncidentDemo, TraceRow } from "@/lib/mock-observability";
-import { fetchTraceList, fetchTraceDetail, fetchRca, LIVE_TRACES } from "@/lib/traces-api";
-import { mapLiveToDemo, mapLiveRow } from "@/lib/live-traces";
+import { fetchTraceList, fetchTraceDetail, fetchRca, fetchFindingId, promoteFinding, LIVE_TRACES } from "@/lib/traces-api";
+import { mapLiveToDemo, mapLiveRow, type LiveDemo } from "@/lib/live-traces";
+import { LoadingPane } from "@/components/product/views";
 import { TraceTree } from "@/components/product/TraceTree";
 import { Timeline } from "@/components/product/Timeline";
 import { SpanDetail } from "@/components/product/SpanDetail";
@@ -32,28 +34,36 @@ function tokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : `${n}`;
 }
 
-function defaultSpanId(demo: ReturnType<typeof getObservabilityDemo>): string {
+/** Null when the trace carries no spans at all — reachable in live mode, and
+ *  asserting spans[0]! there white-screened the primary route. */
+function defaultSpanId(demo: ObservabilityDemo): string | null {
   return (
     demo.finding?.triggeredSpanId ??
     demo.spans.find((s) => s.status !== "ok")?.id ??
-    demo.spans[0]!.id
+    demo.spans[0]?.id ??
+    null
   );
 }
 
 interface LiveData {
-  demo: ObservabilityDemo;
+  /** Null when the live API has no such trace — the route 404s rather than
+   *  substituting the featured incident under the requested id. */
+  demo: LiveDemo | null;
   demos: IncidentDemo[];
   traceRows: TraceRow[];
 }
 
 /** When NEXT_PUBLIC_USE_LIVE_TRACES=1, load the explorer from the live API and
- *  map it into the shapes the UI already renders. Returns null (→ mock) when the
- *  flag is off or any fetch fails, so the demo never breaks. */
-function useLiveExplorer(activeId: string): LiveData | null {
-  const [state, setState] = useState<LiveData | null>(null);
+ *  map it into the shapes the UI already renders. `data` stays null (→ mock)
+ *  when the flag is off or any fetch fails, so the demo never breaks; `pending`
+ *  keeps the caller from painting mock content under a live trace id. */
+function useLiveExplorer(activeId: string): { data: LiveData | null; pending: boolean } {
+  const [data, setData] = useState<LiveData | null>(null);
+  const [pending, setPending] = useState(LIVE_TRACES);
   useEffect(() => {
     if (!LIVE_TRACES) return;
     let cancelled = false;
+    setPending(true);
     (async () => {
       try {
         const list = await fetchTraceList();
@@ -68,30 +78,43 @@ function useLiveExplorer(activeId: string): LiveData | null {
             /* skip this incident */
           }
         }
-        let demo: ObservabilityDemo | null = null;
+        let demo: LiveDemo | null = null;
         try {
           const d = await fetchTraceDetail(activeId);
-          demo = mapLiveToDemo(d, await fetchRca(activeId));
+          // The finding id is what `POST /findings/:id/promote` is keyed on and
+          // `GET /traces/:id` never returns it.
+          demo = mapLiveToDemo(d, await fetchRca(activeId), await fetchFindingId(activeId));
         } catch {
-          /* fall back to mock for the active trace */
+          /* no such live trace — fall through to the mock, or to not-found */
         }
-        if (!cancelled) setState({ demo: demo ?? getObservabilityDemo(activeId), demos, traceRows });
+        const mock = hasObservabilityDemo(activeId) ? getObservabilityDemo(activeId) : null;
+        if (!cancelled) {
+          setData({ demo: demo ?? (mock ? { ...mock, findingId: null } : null), demos, traceRows });
+        }
       } catch {
-        if (!cancelled) setState(null); // whole load failed → mock
+        if (!cancelled) setData(null); // whole load failed → mock
+      } finally {
+        if (!cancelled) setPending(false);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [activeId]);
-  return state;
+  return { data, pending };
 }
 
 export default function IncidentPage({ params }: PageProps) {
   const router = useRouter();
   const [activeId, setActiveId] = useState(params.id);
-  const [selectedSpanId, setSelectedSpanId] = useState(() => defaultSpanId(getObservabilityDemo(params.id)));
+  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(() =>
+    hasObservabilityDemo(params.id) ? defaultSpanId(getObservabilityDemo(params.id)) : null
+  );
   const [modal, setModal] = useState<null | "fixpr" | "graph">(null);
+  // Outcome of the last "Add to eval set" — the button used to navigate to
+  // /evals and claim nothing, so a failed promotion looked like a filed case.
+  const [promo, setPromo] = useState<{ tone: "ok" | "error" | "info"; message: string } | null>(null);
+  const [promoting, setPromoting] = useState(false);
   const [listTab, setListTab] = useState<ListTab>("traces");
   const [search, setSearch] = useState("");
   const [treeMode, setTreeMode] = useState<"trace" | "timeline">("trace");
@@ -110,15 +133,19 @@ export default function IncidentPage({ params }: PageProps) {
     setShowCopilot(window.matchMedia("(min-width: 1280px)").matches);
   }, []);
 
-  const live = useLiveExplorer(activeId);
-  const demo = live?.demo ?? getObservabilityDemo(activeId);
+  const { data: live, pending } = useLiveExplorer(activeId);
+  // No live trace and no mock trace for this id → null, and the route 404s.
+  // Falling through to getObservabilityDemo rendered the featured incident's
+  // six-layer chain under whatever id the visitor typed.
+  const mock = hasObservabilityDemo(activeId) ? getObservabilityDemo(activeId) : null;
+  const demo: LiveDemo | null = live ? live.demo : mock ? { ...mock, findingId: null } : null;
   const demos = live?.demos ?? getAllDemos();
   const traceRows = live?.traceRows ?? getTraceList();
 
   useEffect(() => {
-    setSelectedSpanId(defaultSpanId(demo));
+    if (demo) setSelectedSpanId(defaultSpanId(demo));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [demo.traceId]);
+  }, [demo?.traceId]);
 
   // Esc closes any open modal / dropdown.
   useEffect(() => {
@@ -132,11 +159,57 @@ export default function IncidentPage({ params }: PageProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Back/forward must move between traces, not out of the explorer.
+  useEffect(() => {
+    const onPop = () => {
+      const match = /^\/incidents\/([^/]+)$/.exec(window.location.pathname);
+      if (match?.[1]) setActiveId(decodeURIComponent(match[1]));
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const promoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (promoTimer.current) clearTimeout(promoTimer.current); }, []);
+
   const openIncident = (id: string) => {
+    if (id === activeId) return;
     setActiveId(id);
+    setPromo(null);
+    // Keep the address bar on the trace that is on screen: the URL used to name
+    // a trace the user was no longer looking at, so a shared link, a reload and
+    // the post-mortem link all pointed somewhere else. history over router.push
+    // because a push on the [id] segment remounts the explorer and drops the
+    // selected span.
+    window.history.pushState(null, "", `/incidents/${id}`);
   };
 
-  const selectedSpan = demo.spans.find((s) => s.id === selectedSpanId) ?? demo.spans[0]!;
+  /** The one-click promotion the landing page sells. */
+  const promote = async () => {
+    if (promoting || !demo) return;
+    setPromo(null);
+    // Demo data has no production finding behind it. The flow still runs so the
+    // demo shows what it does, but it must not report a case that was filed.
+    if (!demo.findingId) {
+      setPromo({ tone: "info", message: "No production finding is linked to this trace — nothing was filed. Opening the eval sets." });
+      promoTimer.current = setTimeout(() => router.push("/evals"), 1400);
+      return;
+    }
+    setPromoting(true);
+    const result = await promoteFinding(demo.findingId);
+    setPromoting(false);
+    if (!result) {
+      setPromo({ tone: "error", message: "Could not add to the eval set — the API rejected the promotion. Nothing was filed." });
+      return;
+    }
+    setPromo({
+      tone: "ok",
+      message: result.created
+        ? `Added to “${result.dataset.name}” as a golden case.`
+        : `Already a case in “${result.dataset.name}” — nothing duplicated.`,
+    });
+    promoTimer.current = setTimeout(() => router.push("/evals"), 1400);
+  };
 
   // List rows depend on the active tab.
   const listRows = useMemo(() => {
@@ -165,21 +238,43 @@ export default function IncidentPage({ params }: PageProps) {
     return q ? rows.filter((r) => r.name.toLowerCase().includes(q) || r.sub.toLowerCase().includes(q)) : rows;
   }, [listTab, search, demos, traceRows]);
 
+  // Only the canned incidents have a provenance graph and a post-mortem; both
+  // getters substitute a different incident for anything else.
+  const hasProvenance = isMockIncidentId(activeId);
+
   const commands = useMemo<Command[]>(() => {
     const cmds: Command[] = [];
     traceRows.forEach((r, i) =>
-      cmds.push({ id: `t-${i}`, label: r.name, group: "Traces", hint: r.timestamp, run: () => setActiveId(r.id) })
+      cmds.push({ id: `t-${i}`, label: r.name, group: "Traces", hint: r.timestamp, run: () => openIncident(r.id) })
     );
     NAV_ITEMS.forEach(({ href, label }) =>
       cmds.push({ id: `v-${href}`, label, group: "Views", run: () => router.push(href) })
     );
-    if (demo.finding) {
+    if (demo?.finding) {
       if (demo.fixPr) cmds.push({ id: "a-pr", label: `Open fix PR #${demo.fixPr.number}`, group: "Actions", run: () => setModal("fixpr") });
-      cmds.push({ id: "a-graph", label: "Open causal graph", group: "Actions", run: () => setModal("graph") });
+      if (hasProvenance) cmds.push({ id: "a-graph", label: "Open causal graph", group: "Actions", run: () => setModal("graph") });
     }
     return cmds;
-  }, [demo, traceRows]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demo, traceRows, hasProvenance]);
 
+  // A live load in flight must not paint mock content under the requested id.
+  if (pending) {
+    return (
+      <div className="h-full flex bg-[#0a0a0b] text-zinc-300 overflow-hidden">
+        <ProductNav activeHref="/incidents" back={{ href: "/incidents", label: "All incidents" }} />
+        <div className="flex-1 min-w-0">
+          <LoadingPane label={`Loading trace ${activeId}…`} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!demo) notFound();
+
+  // Undefined only for a trace with no spans at all — the span pane says so
+  // rather than crashing on spans[0]!.
+  const selectedSpan = demo.spans.find((s) => s.id === selectedSpanId) ?? demo.spans[0];
 
   return (
     <div className="h-full flex bg-[#0a0a0b] text-zinc-300 overflow-hidden">
@@ -247,7 +342,7 @@ export default function IncidentPage({ params }: PageProps) {
                 return (
                   <button
                     key={i}
-                    onClick={() => setActiveId(row.id)}
+                    onClick={() => openIncident(row.id)}
                     className={`w-full text-left px-3 py-2 border-b border-white/[0.03] flex items-center gap-2 transition-colors ${
                       isActive ? "bg-white/[0.05]" : "hover:bg-white/[0.02]"
                     }`}
@@ -324,8 +419,34 @@ export default function IncidentPage({ params }: PageProps) {
               demo={demo}
               onOpenFixPr={() => setModal("fixpr")}
               onOpenGraph={() => setModal("graph")}
-              onPromote={() => router.push("/evals")}
+              onPromote={() => void promote()}
+              hasGraph={hasProvenance}
+              hasPostMortem={hasProvenance}
+              promoting={promoting}
             />
+            {promo && (
+              <div
+                className={`flex items-center gap-2 px-3 h-8 border-b flex-shrink-0 ${
+                  promo.tone === "error"
+                    ? "border-red-500/15 bg-red-500/[0.05]"
+                    : promo.tone === "ok"
+                      ? "border-emerald-500/15 bg-emerald-500/[0.05]"
+                      : "border-white/[0.06] bg-white/[0.02]"
+                }`}
+              >
+                {promo.tone === "error" ? (
+                  <AlertTriangle className="w-3 h-3 text-red-400 flex-shrink-0" />
+                ) : promo.tone === "ok" ? (
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                ) : (
+                  <Database className="w-3 h-3 text-amber-300/80 flex-shrink-0" />
+                )}
+                <span className="text-[11px] text-zinc-300 truncate">{promo.message}</span>
+                <button onClick={() => setPromo(null)} className="ml-auto text-zinc-600 hover:text-zinc-300 transition-colors flex-shrink-0">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
             {demo.finding && (
               <button
                 onClick={() => { setTreeMode("trace"); setSelectedSpanId(demo.finding!.triggeredSpanId); }}
@@ -340,20 +461,26 @@ export default function IncidentPage({ params }: PageProps) {
               </button>
             )}
             <div className="flex-1 overflow-auto">
-              {treeMode === "trace" ? (
-                <TraceTree spans={demo.spans} selectedId={selectedSpanId} onSelect={setSelectedSpanId} />
+              {demo.spans.length === 0 ? (
+                <p className="px-4 py-8 font-mono text-[11px] text-zinc-600">This trace was ingested with no spans.</p>
+              ) : treeMode === "trace" ? (
+                <TraceTree spans={demo.spans} selectedId={selectedSpan?.id ?? ""} onSelect={setSelectedSpanId} />
               ) : (
-                <Timeline spans={demo.spans} selectedId={selectedSpanId} onSelect={setSelectedSpanId} />
+                <Timeline spans={demo.spans} selectedId={selectedSpan?.id ?? ""} onSelect={setSelectedSpanId} />
               )}
             </div>
           </section>
 
           {/* ── Span detail ── */}
           <section className="hidden md:flex w-[320px] flex-col border-r border-white/[0.06] flex-shrink-0">
-            <SpanDetail
-              span={selectedSpan}
-              trace={{ repo: demo.repo, gitRef: demo.gitRef, user: demo.user, sessionId: demo.sessionId, metadata: demo.metadata }}
-            />
+            {selectedSpan ? (
+              <SpanDetail
+                span={selectedSpan}
+                trace={{ repo: demo.repo, gitRef: demo.gitRef, user: demo.user, sessionId: demo.sessionId, metadata: demo.metadata }}
+              />
+            ) : (
+              <p className="px-4 py-8 font-mono text-[11px] text-zinc-600">No span to inspect.</p>
+            )}
           </section>
 
           {/* ── Copilot ── */}

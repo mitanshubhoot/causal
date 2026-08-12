@@ -1,16 +1,8 @@
 import { uuidv7 } from "uuidv7";
-import type { FastifyPluginAsync } from "fastify";
-import type { TraceGraph, RootCause } from "@causal/types";
-import { Anthropic } from "@anthropic-ai/sdk";
+import type { FastifyInstance, FastifyPluginAsync } from "fastify";
+import type { CausalNode, TraceGraph } from "@causal/types";
 import { assembleTraceGraph } from "../services/tracegraph.js";
-import { config } from "../config.js";
-
-const IS_DEMO_MODE = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
-
-let anthropic: Anthropic | null = null;
-if (!IS_DEMO_MODE) {
-  anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
-}
+import { complete } from "../services/llm.js";
 
 const postmortemPlugin: FastifyPluginAsync = async (fastify) => {
   // POST /api/v1/postmortem — generate post-mortem from a TraceGraph
@@ -38,23 +30,28 @@ const postmortemPlugin: FastifyPluginAsync = async (fastify) => {
         return reply.badRequest("traceGraphId or rootNodeId required");
       }
 
-      // Generate post-mortem via Claude
-      const markdown = await generatePostMortemMarkdown(traceGraph);
+      const written = await generatePostMortemMarkdown(fastify, orgId, traceGraph);
       const linearTicket = generateLinearTicket(traceGraph);
       const claudeMdRule = generateClaudeMdRule(traceGraph);
 
       const id = uuidv7();
       await fastify.pg`
         INSERT INTO post_mortems (id, org_id, trace_graph_id, markdown, linear_ticket, claude_md_rule, created_at)
-        VALUES (${id}, ${orgId}, ${traceGraph.id}, ${markdown}, ${JSON.stringify(linearTicket)}, ${claudeMdRule}, NOW())
+        VALUES (${id}, ${orgId}, ${traceGraph.id}, ${written.markdown}, ${JSON.stringify(linearTicket)}, ${claudeMdRule}, NOW())
       `;
 
       return reply.code(201).send({
         id,
         traceGraphId: traceGraph.id,
-        markdown,
+        markdown: written.markdown,
         linearTicket,
         claudeMdRule,
+        // `grounded` means a model wrote this from the trace. The structural
+        // summary is real data too, but it is the graph restated, not analysis —
+        // and the export is a document someone will circulate, so the caller
+        // (and the banner inside the markdown) has to say which one it is.
+        grounded: written.grounded,
+        model: written.model,
       });
     }
   );
@@ -97,105 +94,139 @@ const postmortemPlugin: FastifyPluginAsync = async (fastify) => {
   });
 };
 
-// ── Generate post-mortem Markdown via Claude ──────────────────────
-async function generatePostMortemMarkdown(traceGraph: TraceGraph): Promise<string> {
+// ── Generate post-mortem Markdown ─────────────────────────────────
+interface WrittenPostMortem {
+  markdown: string;
+  /** True only when a model wrote the document from the trace evidence. */
+  grounded: boolean;
+  model: string | null;
+}
+
+async function generatePostMortemMarkdown(
+  fastify: FastifyInstance,
+  orgId: string,
+  traceGraph: TraceGraph
+): Promise<WrittenPostMortem> {
   const topCause = traceGraph.rootCauses[0];
-
-  // Demo mode: return pre-generated postmortem
-  if (IS_DEMO_MODE || !anthropic) {
-    const title = topCause?.explanation?.slice(0, 60) ?? "Agent Failure Incident";
-    return `# Post-Mortem — Incident ${new Date().toISOString().split("T")[0]}
-
-## Summary
-${topCause?.explanation ?? "An AI agent failure was detected through automated causal analysis. The root cause was identified in the reasoning layer where the agent made an incorrect assumption about the input data."}
-
-## Timeline
-- **T-6h** — Intent node created: user request received
-- **T-5h** — Spec node created: task requirements defined
-- **T-4h** — Reasoning session: agent made implementation decisions
-- **T-3h** — Code committed: changes deployed to staging
-- **T-1h** — Execution: anomalous behavior detected in production
-- **T-0** — Incident triggered: ${title}
-
-## Root Cause
-${topCause?.explanation ?? "The agent's reasoning step contained an incorrect assumption that was not caught by the spec constraints. This led to code that functioned correctly in test scenarios but failed on edge cases in production."}
-
-## Causal Chain
-${traceGraph.nodes.map(n => `- **[${n.layer}]** ${(n.payload as Record<string, unknown>)["title"] ?? n.kind}`).join("\n")}
-
-## What Went Wrong
-1. The spec did not include explicit constraints for the edge case that triggered the failure
-2. The agent's reasoning prioritized speed over accuracy when making implementation decisions
-3. The code review process did not catch the assumption made during the reasoning step
-4. No runtime guardrail existed to validate the agent's output before execution
-
-## Contributing Factors
-- Latency requirements in the spec created pressure to skip validation steps
-- The training data for the model did not include sufficient examples of this edge case
-- Monitoring was configured for errors but not for incorrect-but-successful responses
-
-## Detection
-The incident was detected via ${(topCause as Record<string, unknown>)?.["layer"] === "EXECUTION" ? "runtime monitoring" : "automated causal graph analysis"} approximately ${Math.round(traceGraph.criticalPath.length * 1.2)} hours after the initial reasoning decision.
-
-## Resolution
-1. Identified the root cause node in the ${topCause?.layer ?? "REASONING"} layer
-2. Updated the spec to include explicit constraints
-3. Added runtime validation guardrails
-4. Deployed fix to production
-
-## Action Items
-1. [Owner TBD] Update spec to include explicit validation requirements
-2. [Owner TBD] Add CLAUDE.md rule to prevent similar reasoning errors
-3. [Owner TBD] Implement runtime guardrail for output validation
-4. [Owner TBD] Add monitoring for incorrect-but-successful responses
-5. [Owner TBD] Review and update test coverage for edge cases
-
-## Lessons Learned
-- Specs must be explicit about edge cases, not just happy paths
-- Agent reasoning decisions should be validated against spec constraints before code generation
-- Runtime guardrails are essential for catching failures that pass code review
-- Causal graph analysis enables rapid root cause identification (${Math.round((topCause?.probability ?? 0.85) * 100)}% confidence)`;
-  }
+  const heading = `# Post-Mortem — Incident ${new Date().toISOString().split("T")[0]}`;
 
   const prompt = `You are a senior engineering manager writing a post-mortem for an engineering team.
 
-INCIDENT INFORMATION:
-- Root cause confidence: ${topCause ? Math.round(topCause.probability * 100) : "unknown"}%
+WHAT CAUSAL RECORDED — this is the only evidence you have:
+- Root cause confidence: ${topCause ? `${Math.round(topCause.probability * 100)}%` : "no root cause was ranked"}
 - Causal chain length: ${traceGraph.criticalPath.length} nodes
 - Layers involved: ${[...new Set(traceGraph.nodes.map((n) => n.layer))].join(", ")}
 
+CAUSAL CHAIN (recorded order, real timestamps):
+${chainLines(traceGraph).join("\n")}
+
 ROOT CAUSE ANALYSIS:
-${topCause?.explanation ?? "Root cause analysis in progress"}
+${topCause?.explanation ?? "No root cause analysis is available for this trace."}
 
 COUNTERFACTUAL:
 ${topCause?.counterfactual ?? "Not available"}
+${topCause?.interventionPoint ? `\nINTERVENTION POINT:\n${topCause.interventionPoint}` : ""}
 
-Generate a structured post-mortem document in Markdown with these exact sections:
+Write the document in Markdown with these sections:
 1. ## Summary (2-3 sentences)
-2. ## Timeline (bullet points, inferred from causal chain)
-3. ## Root Cause (detailed explanation)
-4. ## Causal Chain (the path from spec/intent through reasoning to code to incident)
-5. ## What Went Wrong (3-5 bullet points)
-6. ## Contributing Factors
-7. ## Detection
-8. ## Resolution
-9. ## Action Items (numbered, specific, with owners as [Owner TBD])
-10. ## Lessons Learned
+2. ## Timeline (only events listed in the causal chain above, with their real timestamps)
+3. ## Root Cause
+4. ## Causal Chain (spec/intent through reasoning to code to incident)
+5. ## What Went Wrong (only what the evidence shows)
+6. ## Open Questions (what the trace does NOT tell us)
+7. ## Proposed Remediation (proposals — nothing here has been done yet)
+8. ## Action Items (numbered, specific, owners as [Owner TBD])
 
-Write clearly. Avoid jargon. This document will be read by engineers and product managers.`;
+Rules: state nothing the evidence above does not support. Do not invent times, durations,
+detection latency, deploys, or fixes. If a section has no evidence behind it, write
+"Not established by the trace" and move on. Write clearly, for engineers and PMs.`;
 
-  const response = await anthropic!.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 2000,
+  // Routed through the BYOK layer so the workspace's own provider writes the
+  // document — this route used to demand an Anthropic server key and fall back
+  // to a fabricated one for everybody else.
+  const res = await complete({
+    fastify,
+    orgId,
+    purpose: "rca",
+    maxTokens: 2000,
     messages: [{ role: "user", content: prompt }],
   });
 
-  const text = response.content
-    .filter((b) => b.type === "text")
-    .map((b) => (b as { type: "text"; text: string }).text)
-    .join("\n");
+  if (res?.text.trim()) {
+    return { markdown: `${heading}\n\n${res.text}`, grounded: true, model: res.model };
+  }
 
-  return `# Post-Mortem — Incident ${new Date().toISOString().split("T")[0]}\n\n${text}`;
+  return { markdown: `${heading}\n\n${structuralSummary(traceGraph)}`, grounded: false, model: null };
+}
+
+/**
+ * No-provider fallback: the TraceGraph restated, and nothing else.
+ *
+ * This document is downloadable as an incident record, so every line here has to
+ * come from a node, an edge or a ranked root cause. The version this replaced
+ * invented a T-6h→T-0 timeline, contributing factors, a detection latency and a
+ * "deployed fix to production" resolution for incidents nobody had touched.
+ */
+function structuralSummary(traceGraph: TraceGraph): string {
+  const topCause = traceGraph.rootCauses[0];
+  const layers = [...new Set(traceGraph.nodes.map((n) => n.layer))];
+
+  const causes = traceGraph.rootCauses.length
+    ? traceGraph.rootCauses
+        .map(
+          (c) =>
+            `- **[${c.layer}]** node \`${c.nodeId}\` — ranked ${Math.round(c.probability * 100)}% by the graph\n` +
+            `  - ${c.explanation}\n` +
+            `  - Counterfactual: ${c.counterfactual}` +
+            (c.interventionPoint ? `\n  - Intervention point: ${c.interventionPoint}` : "")
+        )
+        .join("\n")
+    : "_No root cause has been ranked for this trace._";
+
+  return `> **No post-mortem was written — no LLM provider is configured for this workspace.**
+> What follows is a structural summary of the TraceGraph: the nodes, edges and ranked
+> root causes Causal actually recorded. It contains no narrative timeline, contributing
+> factors, detection latency or resolution, because nothing in the graph establishes them.
+> Add a provider key under Settings to have a post-mortem written from this evidence.
+
+## Ranked root causes
+${causes}
+
+## Causal chain
+${chainLines(traceGraph).join("\n")}
+
+## Graph
+- ${traceGraph.nodes.length} nodes across ${layers.length} layer(s): ${layers.join(", ")}
+- ${traceGraph.edges.length} edges
+- Critical path: ${traceGraph.criticalPath.length} node(s)
+- Top root-cause confidence: ${topCause ? `${Math.round(topCause.probability * 100)}%` : "not ranked"}
+- TraceGraph ${traceGraph.id}, status \`${traceGraph.status}\``;
+}
+
+/**
+ * The critical path in recorded order, falling back to every node by timestamp
+ * when no path was ranked. Timestamps are the node's own — never a relative
+ * "T-6h" the graph cannot support.
+ */
+function chainLines(traceGraph: TraceGraph): string[] {
+  const byId = new Map(traceGraph.nodes.map((n) => [n.id, n]));
+  const path = traceGraph.criticalPath
+    .map((id) => byId.get(id))
+    .filter((n): n is CausalNode => n !== undefined);
+  const ordered = path.length ? path : [...traceGraph.nodes].sort((a, b) => a.timestamp - b.timestamp);
+  if (!ordered.length) return ["_The trace has no nodes._"];
+  return ordered.map(
+    (n) => `- ${new Date(n.timestamp).toISOString()} — **[${n.layer}]** ${nodeLabel(n)}`
+  );
+}
+
+function nodeLabel(node: CausalNode): string {
+  const payload = node.payload as Record<string, unknown>;
+  for (const key of ["title", "commitMessage", "summary", "name"]) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return node.kind;
 }
 
 // ── Generate Linear ticket for spec correction ────────────────────
@@ -223,10 +254,11 @@ function generateClaudeMdRule(traceGraph: TraceGraph): string {
     return "# Causal Rule (auto-generated)\nAlways confirm ambiguous requirements in the spec before implementing.";
   }
 
-  const modelId = reasoningNode?.modelVersion ?? "claude-sonnet-4-6";
+  // Only claim the rule applies to a model when the reasoning node recorded one —
+  // the default here used to name a model that never touched the incident.
+  const appliesTo = reasoningNode?.modelVersion ? `\n# Applies to: ${reasoningNode.modelVersion}` : "";
 
-  return `# Causal Rule — auto-generated from incident post-mortem
-# Applies to: ${modelId}
+  return `# Causal Rule — auto-generated from incident post-mortem${appliesTo}
 # Source: Causal TraceGraph ${traceGraph.id}
 
 ## Incident Prevention Rule

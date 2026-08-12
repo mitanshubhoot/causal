@@ -740,6 +740,9 @@ export function getMockIncidents(): { nodes: unknown[]; count: number } {
   return { nodes: MOCK_INCIDENTS, count: MOCK_INCIDENTS.length };
 }
 
+/** Gate any user-supplied id on `isMockIncidentId` first: the fallback below
+ *  substitutes a DIFFERENT incident's provenance chain, so an ungated call
+ *  renders I1's root cause under whatever id was asked for. */
 export function getMockTrace(rootNodeId: string): TraceGraph {
   const tg = TRACE_GRAPH_BY_INCIDENT[rootNodeId];
   if (tg) return tg;
@@ -751,6 +754,9 @@ export function getMockNode(id: string): CausalNode | undefined {
   return MOCK_NODES.find((n) => n.id === id);
 }
 
+/** True only for the four ids that have a canned trace graph AND post-mortem.
+ *  The gate for offering the "Causal graph" / "Post-mortem" actions at all — a
+ *  healthy trace has neither, and both getters substitute another incident. */
 export function isMockIncidentId(id: string): boolean {
   return id in TRACE_GRAPH_BY_INCIDENT;
 }
@@ -1068,7 +1074,10 @@ const POST_MORTEM_BY_INCIDENT: Record<string, CannedPostMortem> = {
   }),
 };
 
-/** Rich canned post-mortem so the Post-Mortem page renders instantly. */
+/** Rich canned post-mortem so the Post-Mortem page renders instantly. Gate on
+ *  `isMockIncidentId` first — the fallback writes up the FEATURED incident
+ *  under the requested id, which reads as a generated document about a failure
+ *  that never happened. */
 export function getMockPostMortem(rootNodeId: string): {
   id: string;
   markdown: string;

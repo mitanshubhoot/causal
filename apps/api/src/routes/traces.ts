@@ -8,6 +8,15 @@ import { listDetectors, getDetector, listFindings, resolveFinding } from "../ser
 import { askCopilot, getCopilotHistory } from "../services/copilot.js";
 import { config } from "../config.js";
 
+// tokens_in/tokens_out are INTEGER and cost is NUMERIC(12,6) (004_traces.sql,
+// 006_observability_v2.sql), so an unbounded value is a 22003 from Postgres —
+// a 500 on schema-valid input. The per-span caps are set so that the rollup of
+// a full 2000-span trace still fits its own columns.
+const MAX_SPAN_TOKENS = 1_000_000;
+const MAX_SPAN_COST = 500;
+const MAX_TRACE_TOKENS = 2_147_483_647;
+const MAX_TRACE_COST = 999_999;
+
 const SpanSchema = z.object({
   id: z.string().min(1),
   parentId: z.string().nullable().optional(),
@@ -26,9 +35,9 @@ const SpanSchema = z.object({
       lines: z.array(z.object({ n: z.number().int(), text: z.string(), marked: z.boolean().optional() })),
     })
     .optional(),
-  tokensIn: z.number().int().nonnegative().optional(),
-  tokensOut: z.number().int().nonnegative().optional(),
-  cost: z.number().nonnegative().optional(),
+  tokensIn: z.number().int().nonnegative().max(MAX_SPAN_TOKENS).optional(),
+  tokensOut: z.number().int().nonnegative().max(MAX_SPAN_TOKENS).optional(),
+  cost: z.number().nonnegative().max(MAX_SPAN_COST).optional(),
   error: z.string().optional(),
 });
 
@@ -37,9 +46,9 @@ const IngestSchema = z.object({
   service: z.string().min(1),
   environment: z.string().optional(),
   model: z.string().optional(),
-  tokensIn: z.number().int().nonnegative().optional(),
-  tokensOut: z.number().int().nonnegative().optional(),
-  cost: z.number().nonnegative().optional(),
+  tokensIn: z.number().int().nonnegative().max(MAX_TRACE_TOKENS).optional(),
+  tokensOut: z.number().int().nonnegative().max(MAX_TRACE_TOKENS).optional(),
+  cost: z.number().nonnegative().max(MAX_TRACE_COST).optional(),
   // must parse as a date — an invalid string used to blow up the INSERT
   startedAt: z.string().refine((s) => !Number.isNaN(Date.parse(s)), "startedAt must be a valid date").optional(),
   repo: z.string().optional(),
@@ -75,7 +84,8 @@ const tracesPlugin: FastifyPluginAsync = async (fastify) => {
   // GET /api/v1/traces — list recent traces for the org.
   fastify.get<{ Querystring: { limit?: string } }>("/", async (request) => {
     const { orgId } = request.authUser;
-    const limit = Math.min(Number(request.query.limit) || 100, 500);
+    // Clamp both ends — a negative limit used to reach `LIMIT ${limit}`.
+    const limit = Math.min(Math.max(Number(request.query.limit) || 100, 1), 500);
     const traces = await listTraces(fastify, orgId, limit);
     return { traces, count: traces.length };
   });
@@ -158,7 +168,8 @@ export const detectorsPlugin: FastifyPluginAsync = async (fastify) => {
   // GET /api/v1/findings — org-wide findings feed for the dashboard.
   fastify.get<{ Querystring: { limit?: string } }>("/findings", async (request) => {
     const { orgId } = request.authUser;
-    const limit = Math.min(Number(request.query.limit) || 100, 500);
+    // Clamp both ends — a negative limit used to reach `LIMIT ${limit}`.
+    const limit = Math.min(Math.max(Number(request.query.limit) || 100, 1), 500);
     const findings = await listFindings(fastify, orgId, limit);
     return { findings, count: findings.length };
   });

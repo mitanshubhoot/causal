@@ -4,12 +4,23 @@ Emits one nested trace from a standalone script. Python 3.10+.
 
 ## 1. Install
 
+`causal-sdk` is **not yet published to PyPI**, so install it from a checkout of the Causal repo.
+
+Inside the Causal monorepo:
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install causal-sdk
+pip install -e packages/sdk-python/
 ```
 
-Inside the Causal monorepo, install the local package instead: `pip install -e packages/sdk-python`.
+From a project outside the monorepo, point pip at the package directory:
+
+```bash
+git clone https://github.com/mitanshubhoot/causal
+
+python -m venv .venv && source .venv/bin/activate
+pip install -e /path/to/causal/packages/sdk-python/
+```
 
 ## 2. Environment
 
@@ -189,7 +200,7 @@ Keep secrets and PII out of `io` and `attributes` — the values are stored verb
 | `ConnectError` / connection refused        | API not running, or wrong `CAUSAL_API_URL`  | Start the API (`http://localhost:3001`) or point at the hosted URL. Confirm with `curl $CAUSAL_API_URL/health`. |
 | Script exits 0, nothing in Traces           | Process exited before the export finished   | Keep `await t.flush()` as the last statement; `async with tracer.trace(...)` flushes for you but swallows export errors by design. |
 | Trace exists, but the UI list looks empty  | Filtered to a different service/environment | Look for service `causal-quickstart`, environment `development`. |
-| `ModuleNotFoundError: causal_sdk`          | Not installed, or wrong venv                | `source .venv/bin/activate && pip install causal-sdk`.           |
-| `ImportError: cannot import name 'CausalTracer'` | Installed version predates the tracer  | `pip install -U causal-sdk` (or `pip install -e packages/sdk-python` in the monorepo). |
+| `ModuleNotFoundError: causal_sdk`          | Not installed, or wrong venv                | `source .venv/bin/activate && pip install -e /path/to/causal/packages/sdk-python/` — it is a local path, not PyPI. |
+| `ImportError: cannot import name 'CausalTracer'` | Installed checkout predates the tracer | `git pull` in the Causal checkout, then re-run the editable install. |
 | `RuntimeWarning: coroutine … never awaited` | Called `flush()` without `await`            | The script must run under `asyncio.run(main())`.                  |
 | No detector finding on the trace           | Detectors disabled on the server            | The trace is still correct; enable detectors server-side to see findings. |

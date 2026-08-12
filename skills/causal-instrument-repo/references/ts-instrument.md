@@ -4,9 +4,18 @@ Runnable recipes. Every snippet is additive: delete it and the app behaves ident
 
 ## 1. Install
 
+`@causal/sdk` is **not yet published to npm**. Build it from a checkout and install it by path:
+
 ```bash
-npm install @causal/sdk       # or: pnpm add @causal/sdk / yarn add @causal/sdk
+git clone https://github.com/mitanshubhoot/causal
+cd causal && pnpm install && pnpm --filter @causal/sdk build
+
+cd /path/to/your-project
+npm install /path/to/causal/packages/sdk-typescript   # or: pnpm add / yarn add, same path
 ```
+
+Inside the Causal monorepo itself, use the workspace protocol instead:
+`pnpm add @causal/sdk --workspace`.
 
 Node 18+ (the SDK uses global `fetch`, zero dependencies). Environment:
 

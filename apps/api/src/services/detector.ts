@@ -159,9 +159,18 @@ export async function runDetector(fastify: FastifyInstance, orgId: string, trace
   if (!verdict) verdict = heuristicVerdict(errSpan, warnSpan);
   const detectorRow = verdict
     ? ((await fastify.pg`
-        SELECT id FROM detectors WHERE org_id = ${orgId} AND type = ${verdict.detector} AND enabled LIMIT 1
-      `) as Array<{ id: string }>)[0]
+        SELECT id, enabled FROM detectors WHERE org_id = ${orgId} AND type = ${verdict.detector} LIMIT 1
+      `) as Array<{ id: string; enabled: boolean }>)[0]
     : undefined;
+
+  // `enabled` is returned by the detectors API, so switching a detector off has
+  // to actually stop it: this used to filter the lookup on the flag and then
+  // write the finding, alert, and trigger RCA anyway. Only an explicit false
+  // disables — an org with no detector row configured still gets findings.
+  if (detectorRow?.enabled === false) {
+    fastify.log.debug({ traceId, detectorId: detectorRow.id }, "detector disabled — skipping finding, alerts and RCA");
+    return null;
+  }
 
   // Record the evaluation either way, so "clean" runs are auditable history.
   if (!verdict || !verdict.identified) {
@@ -192,35 +201,55 @@ export async function runDetector(fastify: FastifyInstance, orgId: string, trace
     VALUES (${orgId}, ${detectorRow?.id ?? null}, ${traceId}, true, ${id}, ${judgeModel})
   `;
 
-  // Alerts — Slack and/or email, whichever is configured.
-  const alertedVia: string[] = [];
-  if (config.ENABLE_SLACK_NOTIFICATIONS && config.SLACK_INCIDENT_CHANNEL) {
-    alertedVia.push("slack");
-    void notifySlackChannel(
-      config.SLACK_INCIDENT_CHANNEL,
-      `:rotating_light: Causal detector — *${verdict.title}* in \`${trace.service}\` (${Math.round(verdict.confidence * 100)}% · ${LABEL[verdict.detector]})`
-    ).catch((err) => fastify.log.warn({ err }, "slack alert failed"));
+  // Alerts — Slack and/or email, whichever is configured. A channel is claimed
+  // only once its send has actually resolved: the previous version pushed the
+  // name before firing, swallowed the failure into a warn, and reported an
+  // alert that may never have left the process. SLACK_BOT_TOKEN is what decides
+  // whether notifySlackChannel posts at all — without it the call is a no-op,
+  // so it must not count as delivery either.
+  const sends: Array<Promise<string | null>> = [];
+  if (config.ENABLE_SLACK_NOTIFICATIONS && config.SLACK_INCIDENT_CHANNEL && config.SLACK_BOT_TOKEN) {
+    sends.push(
+      notifySlackChannel(
+        config.SLACK_INCIDENT_CHANNEL,
+        `:rotating_light: Causal detector — *${verdict.title}* in \`${trace.service}\` (${Math.round(verdict.confidence * 100)}% · ${LABEL[verdict.detector]})`
+      )
+        .then(() => "slack")
+        // A dead Slack workspace must not lose the finding that is already written.
+        .catch((err: unknown) => {
+          fastify.log.warn({ err }, "slack alert failed");
+          return null;
+        })
+    );
   }
   if (config.ALERT_EMAIL_TO) {
-    alertedVia.push("email");
     const failing = trace.spans.find((s) => s.id === verdict.triggeredSpanId);
-    void sendEmailAlert(fastify, {
-      severity: verdict.severity,
-      subject: `[Causal] ${verdict.severity.toUpperCase()} — ${verdict.title}`,
-      heading: verdict.title,
-      body: verdict.summary,
-      facts: [
-        { label: "service", value: trace.service },
-        { label: "detector", value: LABEL[verdict.detector] },
-        { label: "confidence", value: `${Math.round(verdict.confidence * 100)}%` },
-        { label: "trace", value: traceId },
-        ...(failing?.name ? [{ label: "span", value: failing.name }] : []),
-        ...(failing?.git ? [{ label: "origin", value: `${failing.git.file}:${failing.git.line} @ ${failing.git.commit}` }] : []),
-      ],
-      linkUrl: `${config.APP_URL}/incidents/${traceId}`,
-      linkLabel: "Open the trace",
-    }).catch((err) => fastify.log.warn({ err }, "email alert failed"));
+    sends.push(
+      sendEmailAlert(fastify, {
+        severity: verdict.severity,
+        subject: `[Causal] ${verdict.severity.toUpperCase()} — ${verdict.title}`,
+        heading: verdict.title,
+        body: verdict.summary,
+        facts: [
+          { label: "service", value: trace.service },
+          { label: "detector", value: LABEL[verdict.detector] },
+          { label: "confidence", value: `${Math.round(verdict.confidence * 100)}%` },
+          { label: "trace", value: traceId },
+          ...(failing?.name ? [{ label: "span", value: failing.name }] : []),
+          ...(failing?.git ? [{ label: "origin", value: `${failing.git.file}:${failing.git.line} @ ${failing.git.commit}` }] : []),
+        ],
+        linkUrl: `${config.APP_URL}/incidents/${traceId}`,
+        linkLabel: "Open the trace",
+      })
+        // sendEmailAlert returns false when no provider key is configured.
+        .then((sent) => (sent ? "email" : null))
+        .catch((err: unknown) => {
+          fastify.log.warn({ err }, "email alert failed");
+          return null;
+        })
+    );
   }
+  const alertedVia = (await Promise.all(sends)).filter((c): c is string => c !== null);
 
   if (config.ENABLE_AUTO_RCA) {
     setImmediate(async () => {
