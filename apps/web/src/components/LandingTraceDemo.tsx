@@ -1,28 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowUpRight } from "lucide-react";
-import { getMockTrace, MOCK_INCIDENTS, FEATURED_INCIDENT_ID } from "@/lib/mock-data";
+import { FEATURED_INCIDENT_ID } from "@/lib/mock-data";
+import { getAllDemos } from "@/lib/mock-observability";
+import { LandingProductPreview } from "./LandingProductPreview";
 import { ScrambleText } from "./ScrambleText";
-
-// Lazy-load the real product component so it never competes with hero LCP.
-const TraceExplorer = dynamic(
-  () => import("./TraceExplorer").then((m) => m.TraceExplorer),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="h-full flex items-center justify-center">
-        <div className="flex items-center gap-3 text-white/40">
-          <div className="w-4 h-4 border-2 border-white/10 border-t-white/40 rounded-full animate-spin" />
-          <span className="font-mono text-[11px] tracking-[0.15em] uppercase">Assembling causal graph…</span>
-        </div>
-      </div>
-    ),
-  }
-);
 
 const SEV_DOT: Record<string, string> = {
   P1: "bg-red-400",
@@ -30,23 +15,11 @@ const SEV_DOT: Record<string, string> = {
   P3: "bg-yellow-400",
 };
 
-function tabMeta(id: string) {
-  const tg = getMockTrace(id);
-  const incident = tg.nodes.find((n) => n.layer === "INCIDENT");
-  const p = (incident?.payload ?? {}) as Record<string, unknown>;
-  return {
-    id,
-    externalId: (p["externalId"] as string) ?? id.slice(0, 8),
-    severity: (p["severity"] as string) ?? "P3",
-    trace: tg,
-  };
-}
-
 export function LandingTraceDemo() {
-  const tabs = useMemo(() => {
-    const ids = [FEATURED_INCIDENT_ID, ...MOCK_INCIDENTS.map((i) => i.id).filter((i) => i !== FEATURED_INCIDENT_ID)];
-    return ids.map(tabMeta);
-  }, []);
+  const tabs = useMemo(
+    () => getAllDemos().map((d) => ({ id: d.incidentId, externalId: d.externalId, severity: d.severity })),
+    []
+  );
   const [activeId, setActiveId] = useState(FEATURED_INCIDENT_ID);
   const active = tabs.find((t) => t.id === activeId) ?? tabs[0]!;
 
@@ -65,8 +38,8 @@ export function LandingTraceDemo() {
             Investigate it yourself
           </h2>
           <p className="mt-3 text-[15px] text-white/55 max-w-xl mx-auto">
-            This is the real product, running live on the page. Walk the six-layer chain,
-            open the root cause, switch incidents — no signup, no backend.
+            This is the real product, running live on the page. Walk the trace, open the
+            failing span, inspect the code — no signup, no backend.
           </p>
         </motion.div>
 
@@ -110,11 +83,11 @@ export function LandingTraceDemo() {
             </div>
           </div>
 
-          {/* Real TraceExplorer — horizontally scrollable on small screens so its
-              fixed 340px sidebar never crushes the detail panel. */}
+          {/* Real product surface — a live mini trace explorer. Horizontally
+              scrollable on small screens so the panes never crush. */}
           <div className="overflow-x-auto">
-            <div className="min-w-[760px] h-[560px]">
-              <TraceExplorer key={active.id} traceGraph={active.trace} />
+            <div className="min-w-[720px] h-[520px]">
+              <LandingProductPreview key={active.id} incidentId={active.id} />
             </div>
           </div>
         </motion.div>

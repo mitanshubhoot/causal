@@ -1,11 +1,11 @@
 "use client";
 
-import type { ObservabilityDemo } from "@/lib/mock-observability";
+import type { IncidentDemo } from "@/lib/mock-observability";
 import { DETECTOR_LABEL, SeverityChip, ConfidenceMeter, MonoLabel } from "./ui";
 import { ShieldAlert, ChevronRight, AlertOctagon, Activity, DollarSign, GitPullRequest } from "lucide-react";
 
 // ── Detectors view ──────────────────────────────────────────────────
-export function DetectorsView({ demos, onOpen }: { demos: ObservabilityDemo[]; onOpen: (id: string) => void }) {
+export function DetectorsView({ demos, onOpen }: { demos: IncidentDemo[]; onOpen: (id: string) => void }) {
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-5xl mx-auto p-6">
@@ -62,7 +62,7 @@ function StatTile({ label, value, sub, Icon, tone = "text-zinc-100" }: {
   );
 }
 
-export function DashboardView({ demos, onOpen }: { demos: ObservabilityDemo[]; onOpen: (id: string) => void }) {
+export function DashboardView({ demos, onOpen }: { demos: IncidentDemo[]; onOpen: (id: string) => void }) {
   const p1 = demos.filter((d) => d.severity === "P1").length;
   const cost = demos.reduce((a, d) => a + d.cost, 0);
   const avgConf = Math.round((demos.reduce((a, d) => a + d.finding.confidence, 0) / demos.length) * 100);

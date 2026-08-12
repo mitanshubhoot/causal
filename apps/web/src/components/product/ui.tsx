@@ -41,7 +41,9 @@ export function SeverityChip({ severity }: { severity: string }) {
       ? "text-red-400 border-red-500/30 bg-red-500/10"
       : severity === "P2" || severity === "high"
         ? "text-amber-400 border-amber-500/30 bg-amber-500/10"
-        : "text-zinc-400 border-white/10 bg-white/[0.03]";
+        : severity === "OK"
+          ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+          : "text-zinc-400 border-white/10 bg-white/[0.03]";
   return (
     <span className={`inline-flex items-center font-mono text-[10px] tracking-[0.08em] font-semibold px-1.5 py-0.5 rounded border ${tone}`}>
       {severity.toUpperCase()}

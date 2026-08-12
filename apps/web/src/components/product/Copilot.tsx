@@ -18,15 +18,17 @@ const SUGGESTIONS = [
 ];
 
 function answerFor(q: string, demo: ObservabilityDemo): string {
-  const rc = demo.rootCause;
   const ql = q.toLowerCase();
-  if (ql.includes("fix"))
-    return `The fix restores the rollout guard with a safe default: when \`checkout_v2_enabled\` is undefined, resolve_rollout() degrades to the legacy path instead of raising. It's a 6-line change in ${rc.file}. PR #${demo.fixPr.number} is open and passed causal-replay — use "Open fix PR" to view the diff.`;
-  if (ql.includes("prevent") || ql.includes("avoid"))
-    return `Two guards would have prevented it: (1) a defined fallback when a feature flag is missing, and (2) a replay/canary check that exercises the real flag service — CI stayed green here because it was mocked. Causal now watches for tool spans that reference removed symbols.`;
+  const rc = demo.rootCause;
   if (ql.includes("cost") || ql.includes("token"))
-    return `This trace used ${demo.tokensIn.toLocaleString()} input + ${demo.tokensOut.toLocaleString()} output tokens (~$${demo.cost.toFixed(4)}). The wasted spend is the \`llm.recover\` retries after the tool failure — fixing the root cause removes those retries entirely.`;
-  return `The run failed at \`${demo.finding.title.toLowerCase()}\`. ${rc.explanation} The root cause is commit ${rc.commit} (${rc.hopsUpstream} hops upstream), ${Math.round(rc.confidence * 100)}% confidence.`;
+    return `This trace used ${demo.tokensIn.toLocaleString()} input + ${demo.tokensOut.toLocaleString()} output tokens (~$${demo.cost.toFixed(4)}) across ${demo.spans.length} spans.${rc ? " The wasted spend is the recovery retries after the failure — fixing the root cause removes them." : " Nothing anomalous — spend is in line with similar runs."}`;
+  if (!rc)
+    return `This trace completed successfully — no detector flagged it. All ${demo.spans.length} spans returned ok, latency and cost are nominal. Nothing to fix here.`;
+  if (ql.includes("fix"))
+    return `The fix is a small, safe change in ${rc.file}: ${demo.fixPr?.description ?? "restore the guard with a safe default"} PR #${demo.fixPr?.number} is open and passed causal-replay — use "Open fix PR" to view the diff.`;
+  if (ql.includes("prevent") || ql.includes("avoid"))
+    return `Two guards would have prevented it: a safe default at the failing call site, and a replay/canary check that exercises the real dependency — CI stayed green because it was mocked. Causal now watches for this failure signature across your agents.`;
+  return `The run failed at \`${demo.finding?.title.toLowerCase() ?? "the failing span"}\`. ${rc.explanation} Root cause: commit ${rc.commit} (${rc.hopsUpstream} hops upstream), ${Math.round(rc.confidence * 100)}% confidence.`;
 }
 
 export function Copilot({
@@ -39,11 +41,17 @@ export function Copilot({
   onOpenGraph: () => void;
 }) {
   const intro = useMemo<Msg>(() => {
-    const failing = demo.spans.find((s) => s.id === demo.finding.triggeredSpanId);
+    if (!demo.finding || !demo.rootCause) {
+      return {
+        role: "assistant",
+        text: `I analyzed trace ${demo.traceId} (${demo.service}). All ${demo.spans.length} spans completed successfully — no detector flagged this run, and latency and cost look nominal. Ask me anything about it.`,
+      };
+    }
+    const failing = demo.spans.find((s) => s.id === demo.finding!.triggeredSpanId);
     const where = failing?.git ? ` (${failing.git.file}:${failing.git.line})` : "";
     return {
       role: "assistant",
-      text: `I analyzed trace ${demo.traceId}. The run failed at \`${failing?.name ?? "an unknown span"}\`${where}. ${demo.finding.summary}\n\nRoot cause: ${demo.rootCause.summary} — introduced in commit ${demo.rootCause.commit}. ${demo.rootCause.counterfactual}`,
+      text: `I analyzed trace ${demo.traceId}. The run failed at \`${failing?.name ?? "an unknown span"}\`${where}. ${demo.finding!.summary}\n\nRoot cause: ${demo.rootCause!.summary} — introduced in commit ${demo.rootCause!.commit}. ${demo.rootCause!.counterfactual}`,
     };
   }, [demo]);
 
@@ -85,27 +93,31 @@ export function Copilot({
           )
         )}
 
-        {/* Actions */}
-        <div className="flex flex-wrap gap-2 pt-1">
-          <button
-            onClick={onOpenFixPr}
-            className="inline-flex items-center gap-1.5 font-mono text-[11px] text-emerald-300 border border-emerald-500/25 bg-emerald-500/[0.06] rounded-md px-2.5 py-1.5 hover:bg-emerald-500/10 transition-colors"
-          >
-            <GitPullRequest className="w-3 h-3" /> Open fix PR #{demo.fixPr.number}
-          </button>
-          <button
-            onClick={onOpenGraph}
-            className="inline-flex items-center gap-1.5 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2.5 py-1.5 hover:border-white/20 transition-colors"
-          >
-            <Waypoints className="w-3 h-3" /> Causal graph
-          </button>
-          <Link
-            href={`/incidents/${demo.incidentId}/postmortem`}
-            className="inline-flex items-center gap-1.5 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2.5 py-1.5 hover:border-white/20 transition-colors"
-          >
-            <FileText className="w-3 h-3" /> Post-mortem
-          </Link>
-        </div>
+        {/* Actions — only for incidents (traces with a finding) */}
+        {demo.finding && (
+          <div className="flex flex-wrap gap-2 pt-1">
+            {demo.fixPr && (
+              <button
+                onClick={onOpenFixPr}
+                className="inline-flex items-center gap-1.5 font-mono text-[11px] text-emerald-300 border border-emerald-500/25 bg-emerald-500/[0.06] rounded-md px-2.5 py-1.5 hover:bg-emerald-500/10 transition-colors"
+              >
+                <GitPullRequest className="w-3 h-3" /> Open fix PR #{demo.fixPr.number}
+              </button>
+            )}
+            <button
+              onClick={onOpenGraph}
+              className="inline-flex items-center gap-1.5 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2.5 py-1.5 hover:border-white/20 transition-colors"
+            >
+              <Waypoints className="w-3 h-3" /> Causal graph
+            </button>
+            <Link
+              href={`/incidents/${demo.incidentId}/postmortem`}
+              className="inline-flex items-center gap-1.5 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2.5 py-1.5 hover:border-white/20 transition-colors"
+            >
+              <FileText className="w-3 h-3" /> Post-mortem
+            </Link>
+          </div>
+        )}
 
         {/* Suggestions (only before the user asks anything) */}
         {msgs.length === 0 && (

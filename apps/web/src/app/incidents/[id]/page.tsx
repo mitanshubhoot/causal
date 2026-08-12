@@ -29,22 +29,31 @@ function tokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : `${n}`;
 }
 
+function defaultSpanId(demo: ReturnType<typeof getObservabilityDemo>): string {
+  return (
+    demo.finding?.triggeredSpanId ??
+    demo.spans.find((s) => s.status !== "ok")?.id ??
+    demo.spans[0]!.id
+  );
+}
+
 const REPO_URL = "https://github.com/mitanshubhoot/causal";
 
 export default function IncidentPage({ params }: PageProps) {
   const [view, setView] = useState<View>("tracing");
   const [activeId, setActiveId] = useState(params.id);
-  const [selectedSpanId, setSelectedSpanId] = useState(getObservabilityDemo(params.id).finding.triggeredSpanId);
+  const [selectedSpanId, setSelectedSpanId] = useState(() => defaultSpanId(getObservabilityDemo(params.id)));
   const [modal, setModal] = useState<null | "fixpr" | "graph">(null);
   const [listTab, setListTab] = useState<ListTab>("traces");
   const [search, setSearch] = useState("");
   const [treeMode, setTreeMode] = useState<"trace" | "timeline">("trace");
+  const [wsOpen, setWsOpen] = useState(false);
 
   const demo = getObservabilityDemo(activeId);
   const demos = getAllDemos();
 
   useEffect(() => {
-    setSelectedSpanId(getObservabilityDemo(activeId).finding.triggeredSpanId);
+    setSelectedSpanId(defaultSpanId(getObservabilityDemo(activeId)));
   }, [activeId]);
 
   const openIncident = (id: string) => {
@@ -71,7 +80,7 @@ export default function IncidentPage({ params }: PageProps) {
       rows = demos.map((d) => ({
         id: d.incidentId,
         name: d.service,
-        sub: `${d.tokensIn > 0 ? "1" : "1"} trace · ${d.model}`,
+        sub: `${d.model} · ${d.severity}`,
         status: d.spans.find((s) => s.kind === "agent")?.status ?? "ok",
       }));
     } else {
@@ -127,12 +136,32 @@ export default function IncidentPage({ params }: PageProps) {
         <>
           {/* ── Traces list ── */}
           <aside className="hidden md:flex w-[248px] flex-col border-r border-white/[0.06] flex-shrink-0">
-            <button className="flex items-center gap-1.5 px-3 h-12 border-b border-white/[0.06] hover:bg-white/[0.02] transition-colors w-full">
-              <span className="font-mono text-[12px] text-zinc-300">causal</span>
-              <span className="text-zinc-700">/</span>
-              <span className="font-mono text-[12px] text-zinc-400">demo</span>
-              <ChevronDown className="w-3 h-3 text-zinc-600 ml-auto" />
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setWsOpen((v) => !v)}
+                className="flex items-center gap-1.5 px-3 h-12 border-b border-white/[0.06] hover:bg-white/[0.02] transition-colors w-full"
+              >
+                <span className="font-mono text-[12px] text-zinc-300">causal</span>
+                <span className="text-zinc-700">/</span>
+                <span className="font-mono text-[12px] text-zinc-400">demo</span>
+                <ChevronDown className={`w-3 h-3 text-zinc-600 ml-auto transition-transform ${wsOpen ? "rotate-180" : ""}`} />
+              </button>
+              {wsOpen && (
+                <div className="absolute top-11 left-2 right-2 z-30 rounded-md border border-white/10 bg-[#111114] shadow-xl overflow-hidden">
+                  {["demo", "production", "staging"].map((ws, i) => (
+                    <button
+                      key={ws}
+                      onClick={() => setWsOpen(false)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.04] transition-colors"
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${i === 0 ? "bg-indigo-400" : "bg-zinc-700"}`} />
+                      <span className="font-mono text-[12px] text-zinc-300">causal / {ws}</span>
+                      {i === 0 && <span className="ml-auto font-mono text-[9px] text-zinc-600 uppercase">current</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="flex items-center gap-4 px-3 border-b border-white/[0.06]">
               {(["traces", "users", "sessions"] as ListTab[]).map((t) => (
                 <button
@@ -162,7 +191,7 @@ export default function IncidentPage({ params }: PageProps) {
                 <p className="px-3 py-4 font-mono text-[11px] text-zinc-600">No results.</p>
               )}
               {listRows.map((row, i) => {
-                const isActive = row.id === activeId && i < 4;
+                const isActive = row.id === activeId;
                 return (
                   <button
                     key={i}
@@ -247,7 +276,7 @@ export default function IncidentPage({ params }: PageProps) {
             <div className="flex items-center gap-2 px-4 h-11 border-b border-white/[0.06]">
               {modal === "fixpr" ? <ScanSearch className="w-4 h-4 text-emerald-400/80" /> : <Waypoints className="w-4 h-4 text-indigo-300/80" />}
               <span className="font-mono text-[12px] text-zinc-300">
-                {modal === "fixpr" ? `Fix PR #${demo.fixPr.number}` : "Causal graph — provenance"}
+                {modal === "fixpr" ? `Fix PR #${demo.fixPr?.number ?? ""}` : "Causal graph — provenance"}
               </span>
               <button onClick={() => setModal(null)} className="ml-auto text-zinc-500 hover:text-zinc-200 transition-colors">
                 <X className="w-4 h-4" />

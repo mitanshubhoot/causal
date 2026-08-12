@@ -86,17 +86,25 @@ export interface ObservabilityDemo {
   traceId: string;
   externalId: string;
   title: string;
-  severity: "P1" | "P2" | "P3";
+  severity: "P1" | "P2" | "P3" | "OK";
   startedAt: string; // ISO-ish display string
   model: string;
   tokensIn: number;
   tokensOut: number;
   cost: number;
   spans: DemoSpan[];
+  // healthy traces omit finding/rootCause/fixPr
+  finding?: DetectorFinding;
+  rootCause?: DemoRootCause;
+  fixPr?: FixPR;
+}
+
+/** An incident always has a finding, root cause, and fix PR. */
+export type IncidentDemo = ObservabilityDemo & {
   finding: DetectorFinding;
   rootCause: DemoRootCause;
   fixPr: FixPR;
-}
+};
 
 // Incident node ids (match mock-data.ts) ─────────────────────────────
 const I1 = "01937000-0001-7000-8000-000000000006";
@@ -105,7 +113,7 @@ const I3 = "01937000-0003-7000-8000-000000000006";
 const I4 = "01937000-0004-7000-8000-000000000006";
 
 // ── Incident 4 (featured): coding agent removed a live rollout flag ──
-const DEMO_I4: ObservabilityDemo = {
+const DEMO_I4: IncidentDemo = {
   incidentId: I4,
   service: "storefront-checkout",
   environment: "production",
@@ -287,7 +295,7 @@ const DEMO_I4: ObservabilityDemo = {
 };
 
 // ── Incident 1: healthcare voice bot booked the wrong day ────────────
-const DEMO_I1: ObservabilityDemo = {
+const DEMO_I1: IncidentDemo = {
   incidentId: I1,
   service: "healthcare-voice-bot",
   environment: "production",
@@ -302,13 +310,15 @@ const DEMO_I1: ObservabilityDemo = {
   cost: 0.1122,
   spans: [
     { id: "s0", parentId: null, name: "voice-scheduler.run", kind: "agent", startMs: 0, durationMs: 1830, status: "warn",
-      attributes: [{ label: "session", value: "sess-voice-2231" }, { label: "channel", value: "phone" }] },
+      attributes: [{ label: "session", value: "sess-voice-2231" }, { label: "channel", value: "phone" }],
+      io: { input: "Caller: I'd like to schedule a follow-up with Dr. Chen for next Tuesday at 2pm.", output: "Booked Thursday 2:00pm with Dr. Chen. (Confirmation skipped under latency SLA.)" } },
     { id: "s1", parentId: "s0", name: "asr.transcribe", kind: "tool", startMs: 30, durationMs: 410, status: "warn",
       error: "Low ASR confidence (0.61) on date token",
       git: { file: "agents/voice/asr.py", line: 88, commit: "7c1d9e2a" },
       attributes: [{ label: "confidence", value: "0.61" }, { label: "heard", value: "“Thursday”" }, { label: "said", value: "“Tuesday”" }] },
     { id: "s2", parentId: "s0", name: "llm.plan_booking", kind: "llm", startMs: 450, durationMs: 690, status: "ok",
-      attributes: [{ label: "model", value: "claude-sonnet-4-5" }, { label: "output_tokens", value: "142" }] },
+      attributes: [{ label: "model", value: "claude-sonnet-4-5" }, { label: "output_tokens", value: "142" }],
+      io: { input: "Transcribed request: schedule with Dr. Chen. ASR date token confidence 0.61.", output: "Plan: book the requested slot. Confirmation optional if latency budget is tight." } },
     { id: "s3", parentId: "s0", name: "tool.book_appointment", kind: "tool", startMs: 1150, durationMs: 300, status: "error",
       error: "Booked Thursday 2pm — confirmation step skipped",
       git: { file: "agents/voice/booking.py", line: 54, commit: "7c1d9e2a" },
@@ -351,7 +361,7 @@ const DEMO_I1: ObservabilityDemo = {
 };
 
 // ── Incident 2: stock agent KeyError ────────────────────────────────
-const DEMO_I2: ObservabilityDemo = {
+const DEMO_I2: IncidentDemo = {
   incidentId: I2,
   service: "stock-tool-agent",
   environment: "production",
@@ -366,9 +376,11 @@ const DEMO_I2: ObservabilityDemo = {
   cost: 0.0471,
   spans: [
     { id: "s0", parentId: null, name: "stock-agent.run", kind: "agent", startMs: 0, durationMs: 940, status: "error",
-      attributes: [{ label: "session", value: "sess-stock-8890" }, { label: "symbol", value: "NVDA" }] },
+      attributes: [{ label: "session", value: "sess-stock-8890" }, { label: "symbol", value: "NVDA" }],
+      io: { input: "What's NVDA doing today? Give me price and % change.", output: "Failed — the quote formatter raised KeyError: 'change'. Unable to return a quote." } },
     { id: "s1", parentId: "s0", name: "llm.plan", kind: "llm", startMs: 20, durationMs: 380, status: "ok",
-      attributes: [{ label: "model", value: "claude-sonnet-4-5" }, { label: "output_tokens", value: "77" }] },
+      attributes: [{ label: "model", value: "claude-sonnet-4-5" }, { label: "output_tokens", value: "77" }],
+      io: { input: "Fetch and format the latest NVDA quote for the user.", output: "Plan: call get_quote, then format price and percentage change." } },
     { id: "s2", parentId: "s0", name: "tool.get_quote", kind: "tool", startMs: 400, durationMs: 210, status: "ok",
       attributes: [{ label: "provider", value: "quotes-api" }, { label: "fields", value: "price, pct_change" }] },
     { id: "s3", parentId: "s0", name: "function.format_quote", kind: "function", startMs: 610, durationMs: 8, status: "error",
@@ -411,7 +423,7 @@ const DEMO_I2: ObservabilityDemo = {
 };
 
 // ── Incident 3: billing invoice to wrong customer ───────────────────
-const DEMO_I3: ObservabilityDemo = {
+const DEMO_I3: IncidentDemo = {
   incidentId: I3,
   service: "billing-agent",
   environment: "production",
@@ -426,9 +438,11 @@ const DEMO_I3: ObservabilityDemo = {
   cost: 0.0388,
   spans: [
     { id: "s0", parentId: null, name: "billing-agent.run", kind: "agent", startMs: 0, durationMs: 1260, status: "error",
-      attributes: [{ label: "session", value: "sess-bill-3390" }, { label: "invoice", value: "$4,200.00" }] },
+      attributes: [{ label: "session", value: "sess-bill-3390" }, { label: "invoice", value: "$4,200.00" }],
+      io: { input: "Generate and send the monthly invoice for order #55210 ($4,200.00).", output: "Invoice sent to cust_5522 — WRONG recipient (expected cust_5521)." } },
     { id: "s1", parentId: "s0", name: "llm.plan_invoice", kind: "llm", startMs: 20, durationMs: 420, status: "ok",
-      attributes: [{ label: "model", value: "claude-sonnet-4-5" }, { label: "output_tokens", value: "110" }] },
+      attributes: [{ label: "model", value: "claude-sonnet-4-5" }, { label: "output_tokens", value: "110" }],
+      io: { input: "Prepare the monthly invoice for order #55210 and send it to the customer.", output: "Plan: resolve the customer for the order, then render and send the invoice." } },
     { id: "s2", parentId: "s0", name: "db.lookup_customer", kind: "db", startMs: 440, durationMs: 60, status: "error",
       error: "Index-based lookup returned wrong customer",
       git: { file: "agents/billing/lookup.py", line: 33, commit: "5e2b7d18" },
@@ -467,40 +481,129 @@ const DEMO_I3: ObservabilityDemo = {
   },
 };
 
-const DEMOS: Record<string, ObservabilityDemo> = {
-  [I1]: DEMO_I1,
-  [I2]: DEMO_I2,
-  [I3]: DEMO_I3,
-  [I4]: DEMO_I4,
-};
+// ── Healthy traces — successful runs, so the workspace reads real ────
+function healthy(over: Partial<ObservabilityDemo> & Pick<ObservabilityDemo, "incidentId" | "service" | "traceId" | "startedAt" | "spans" | "tokensIn" | "tokensOut" | "cost">): ObservabilityDemo {
+  return {
+    environment: "production",
+    externalId: "—",
+    title: over.spans[0]?.name ?? over.service,
+    severity: "OK",
+    model: "claude-sonnet-4-5",
+    ...over,
+  };
+}
 
-/** Returns the observability demo for an incident id, defaulting to the featured one. */
+const H_CHECKOUT = healthy({
+  incidentId: "trace-ok-checkout-8821",
+  service: "checkout-assistant",
+  traceId: "a17c9f20b3e4d581",
+  startedAt: "14:05:19 UTC",
+  tokensIn: 9800, tokensOut: 1420, cost: 0.1502,
+  spans: [
+    { id: "s0", parentId: null, name: "checkout-assistant.run", kind: "agent", startMs: 0, durationMs: 1180, status: "ok",
+      attributes: [{ label: "session", value: "sess-code-4460" }, { label: "user", value: "cust_71a2" }],
+      io: { input: "Place the order for cart cust_71a2 (3 items, $212.40).", output: "Order placed. Confirmation #ORD-88231 sent to the customer." } },
+    { id: "s1", parentId: "s0", name: "llm.plan_checkout", kind: "llm", startMs: 30, durationMs: 540, status: "ok",
+      attributes: [{ label: "model", value: "claude-sonnet-4-5" }, { label: "output_tokens", value: "176" }] },
+    { id: "s2", parentId: "s0", name: "tool.get_cart", kind: "tool", startMs: 580, durationMs: 110, status: "ok",
+      attributes: [{ label: "items", value: "3" }, { label: "total", value: "$212.40" }] },
+    { id: "s3", parentId: "s0", name: "tool.resolve_rollout_flag", kind: "tool", startMs: 700, durationMs: 18, status: "ok",
+      attributes: [{ label: "flag", value: "checkout_v2_enabled" }, { label: "result", value: "true" }] },
+    { id: "s4", parentId: "s0", name: "POST /api/checkout", kind: "http", startMs: 720, durationMs: 440, status: "ok",
+      attributes: [{ label: "status", value: "200" }, { label: "latency", value: "440ms" }] },
+  ],
+});
+
+const H_RESEARCH = healthy({
+  incidentId: "trace-ok-research-4410",
+  service: "research-pipeline",
+  traceId: "bb65fe6dc2ba50d3",
+  startedAt: "13:20:44 UTC",
+  tokensIn: 41200, tokensOut: 8600, cost: 0.6120,
+  spans: [
+    { id: "s0", parentId: null, name: "research_pipeline.run", kind: "agent", startMs: 0, durationMs: 8200, status: "ok",
+      attributes: [{ label: "session", value: "sess-rsrch-2201" }, { label: "steps", value: "3" }],
+      io: { input: "Research the key features of OpenTelemetry for AI observability and summarize.", output: "Delivered a 3-section report: tracing model, semantic conventions, and agent spans." } },
+    { id: "s1", parentId: "s0", name: "agent.researcher", kind: "agent", startMs: 40, durationMs: 3100, status: "ok",
+      attributes: [{ label: "tool_calls", value: "4" }] },
+    { id: "s2", parentId: "s1", name: "llm.gather", kind: "llm", startMs: 60, durationMs: 1400, status: "ok",
+      attributes: [{ label: "model", value: "claude-sonnet-4-5" }, { label: "output_tokens", value: "620" }] },
+    { id: "s3", parentId: "s0", name: "agent.analyst", kind: "agent", startMs: 3200, durationMs: 2400, status: "ok",
+      attributes: [{ label: "tool_calls", value: "2" }] },
+    { id: "s4", parentId: "s0", name: "agent.writer", kind: "agent", startMs: 5700, durationMs: 2400, status: "ok",
+      attributes: [{ label: "words", value: "812" }] },
+  ],
+});
+
+const H_SUPPORT = healthy({
+  incidentId: "trace-ok-support-7735",
+  service: "support-agent",
+  traceId: "c93a4471de205b16",
+  startedAt: "11:48:03 UTC",
+  tokensIn: 6400, tokensOut: 980, cost: 0.0921,
+  spans: [
+    { id: "s0", parentId: null, name: "support-agent.run", kind: "agent", startMs: 0, durationMs: 940, status: "ok",
+      attributes: [{ label: "session", value: "sess-supp-9930" }, { label: "ticket", value: "T-4821" }],
+      io: { input: "Customer can't reset their password. Help them.", output: "Sent a reset link and confirmed the account email. Ticket resolved." } },
+    { id: "s1", parentId: "s0", name: "llm.classify", kind: "llm", startMs: 30, durationMs: 360, status: "ok",
+      attributes: [{ label: "model", value: "claude-sonnet-4-5" }, { label: "intent", value: "password_reset" }] },
+    { id: "s2", parentId: "s0", name: "tool.send_reset_link", kind: "tool", startMs: 400, durationMs: 220, status: "ok",
+      attributes: [{ label: "channel", value: "email" }, { label: "delivered", value: "true" }] },
+    { id: "s3", parentId: "s0", name: "db.close_ticket", kind: "db", startMs: 630, durationMs: 40, status: "ok",
+      attributes: [{ label: "ticket", value: "T-4821" }, { label: "status", value: "resolved" }] },
+  ],
+});
+
+const H_STOCK = healthy({
+  incidentId: "trace-ok-stock-1190",
+  service: "stock-tool-agent",
+  traceId: "d22b7e04a9c6f318",
+  startedAt: "10:02:55 UTC",
+  tokensIn: 3900, tokensOut: 540, cost: 0.0453,
+  spans: [
+    { id: "s0", parentId: null, name: "stock-agent.run", kind: "agent", startMs: 0, durationMs: 720, status: "ok",
+      attributes: [{ label: "session", value: "sess-stock-8871" }, { label: "symbol", value: "AAPL" }],
+      io: { input: "What's AAPL doing today?", output: "AAPL is at $228.51, up 1.2% on the day." } },
+    { id: "s1", parentId: "s0", name: "llm.plan", kind: "llm", startMs: 20, durationMs: 300, status: "ok",
+      attributes: [{ label: "model", value: "claude-sonnet-4-5" }, { label: "output_tokens", value: "64" }] },
+    { id: "s2", parentId: "s0", name: "tool.get_quote", kind: "tool", startMs: 330, durationMs: 190, status: "ok",
+      attributes: [{ label: "provider", value: "quotes-api" }, { label: "fields", value: "price, pct_change" }] },
+    { id: "s3", parentId: "s0", name: "function.format_quote", kind: "function", startMs: 520, durationMs: 6, status: "ok",
+      attributes: [{ label: "price", value: "$228.51" }, { label: "pct_change", value: "+1.2%" }] },
+  ],
+});
+
+const INCIDENTS: IncidentDemo[] = [DEMO_I4, DEMO_I2, DEMO_I1, DEMO_I3];
+const HEALTHY: ObservabilityDemo[] = [H_CHECKOUT, H_RESEARCH, H_SUPPORT, H_STOCK];
+
+// A realistic feed ordered like a live workspace (newest first, incidents + healthy).
+const TRACE_FEED: ObservabilityDemo[] = [DEMO_I2, DEMO_I4, H_CHECKOUT, H_RESEARCH, DEMO_I1, H_SUPPORT, H_STOCK, DEMO_I3];
+
+const DEMOS: Record<string, ObservabilityDemo> = Object.fromEntries(
+  [...INCIDENTS, ...HEALTHY].map((d) => [d.incidentId, d])
+);
+
+/** Returns the trace for an id (incident or healthy), defaulting to the featured incident. */
 export function getObservabilityDemo(incidentId: string): ObservabilityDemo {
   return DEMOS[incidentId] ?? DEMO_I4;
 }
 
-/** All demos, featured incident first — for the detectors + dashboard views. */
-export function getAllDemos(): ObservabilityDemo[] {
-  return [DEMO_I4, DEMO_I2, DEMO_I1, DEMO_I3];
+/** Only the incidents (with findings) — for the detectors + dashboard views and the /incidents list. */
+export function getAllDemos(): IncidentDemo[] {
+  return INCIDENTS;
 }
 
 export function hasObservabilityDemo(incidentId: string): boolean {
   return incidentId in DEMOS;
 }
 
-/** Rows for the traces list panel. The four incidents are real/selectable;
- *  the rest are decorative session rows that open the featured incident. */
+/** Coherent rows for the traces list panel — every row opens the trace it names. */
 export function getTraceList(): TraceRow[] {
-  return [
-    { id: I4, name: "checkout-assistant.run", timestamp: "2026-08-12 14:32:07", status: "error", selectable: true },
-    { id: I2, name: "stock-agent.run", timestamp: "2026-08-12 16:41:03", status: "error", selectable: true },
-    { id: I1, name: "voice-scheduler.run", timestamp: "2026-08-12 09:14:52", status: "warn", selectable: true },
-    { id: I3, name: "billing-agent.run", timestamp: "2026-08-11 11:07:41", status: "error", selectable: true },
-    { id: I4, name: "research_pipeline.run", timestamp: "2026-08-11 22:18:40", status: "ok", selectable: true },
-    { id: I4, name: "demo_session", timestamp: "2026-08-11 19:30:43", status: "ok", selectable: true },
-    { id: I4, name: "POST /api/checkout", timestamp: "2026-08-11 16:08:51", status: "ok", selectable: true },
-    { id: I4, name: "demo_session", timestamp: "2026-08-11 13:51:32", status: "ok", selectable: true },
-    { id: I4, name: "streaming_demo", timestamp: "2026-08-10 12:42:07", status: "ok", selectable: true },
-    { id: I4, name: "demo_session", timestamp: "2026-08-10 12:27:14", status: "ok", selectable: true },
-  ];
+  return TRACE_FEED.map((d) => ({
+    id: d.incidentId,
+    name: d.spans[0]?.name ?? d.service,
+    timestamp: d.startedAt,
+    status: d.spans[0]?.status ?? "ok",
+    selectable: true,
+  }));
 }
