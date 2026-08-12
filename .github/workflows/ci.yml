@@ -61,6 +61,31 @@ jobs:
       - name: Type-check
         run: pnpm exec turbo run type-check
 
+      # Vercel runs its OWN tsc pass after the turbo build, and it does not
+      # inherit strictNullChecks from our tsconfig. Code that compiles here can
+      # therefore still fail the deploy — it has happened twice: once where a
+      # {ok:true}|{ok:false} union stopped narrowing, and once where a zod
+      # schema's inferred type lost its required keys. Reproduce that pass here
+      # so the deploy is not the thing that discovers it.
+      #
+      # The implicit-any family is excluded deliberately: those only appear
+      # because turning off strictNullChecks widens inference, and Vercel does
+      # not enforce them. Anything else is a real deploy blocker.
+      - name: Type-check (Vercel strictness parity)
+        run: |
+          set -o pipefail
+          fail=0
+          for app in apps/api apps/web; do
+            out=$(pnpm --dir "$app" exec tsc --noEmit -p tsconfig.json --strictNullChecks false 2>&1 \
+                  | grep "error TS" | grep -Ev "TS70(05|06|11|18)" || true)
+            if [ -n "$out" ]; then
+              echo "::error::$app would fail Vercel's TypeScript pass:"
+              echo "$out"
+              fail=1
+            fi
+          done
+          exit $fail
+
       - name: Test
         run: pnpm exec turbo run test
 

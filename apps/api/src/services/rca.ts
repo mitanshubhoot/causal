@@ -172,7 +172,13 @@ Produce ONLY a JSON object: {"summary": short root-cause, "explanation": 2-3 sen
     hopsUpstream: 1,
     fixTitle: parsed.fixTitle ?? `fix(${trace.service}): guard ${span.name}`,
     fixDescription: parsed.fixDescription ?? "",
-    fixDiff: parsed.fixDiff,
+    // Built explicitly rather than assigned from `parsed.fixDiff` directly.
+    // Vercel's TypeScript analyzer runs with different strictness than this
+    // tsconfig, and without strictNullChecks zod's inferred output type loses
+    // required-ness — every key reads as optional, so the array no longer
+    // satisfies DiffLine[] and the deploy fails on a build that passes here.
+    // Constructing the shape makes the type independent of that inference.
+    fixDiff: parsed.fixDiff.map((d) => ({ kind: d.kind ?? "ctx", text: d.text ?? "" })),
   };
   return { rca: built, model: res.model };
 }
