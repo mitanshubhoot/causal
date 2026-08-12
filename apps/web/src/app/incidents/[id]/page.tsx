@@ -16,6 +16,7 @@ import { SpanDetail } from "@/components/product/SpanDetail";
 import { Copilot } from "@/components/product/Copilot";
 import { FixPrView } from "@/components/product/panels";
 import { DetectorsView, DashboardView } from "@/components/product/views";
+import { CommandPalette, type Command } from "@/components/product/CommandPalette";
 import { SeverityChip, STATUS_META, CopyButton, DETECTOR_LABEL } from "@/components/product/ui";
 
 interface PageProps {
@@ -101,6 +102,21 @@ export default function IncidentPage({ params }: PageProps) {
     const q = search.trim().toLowerCase();
     return q ? rows.filter((r) => r.name.toLowerCase().includes(q) || r.sub.toLowerCase().includes(q)) : rows;
   }, [listTab, search, demos]);
+
+  const commands = useMemo<Command[]>(() => {
+    const cmds: Command[] = [];
+    getTraceList().forEach((r, i) =>
+      cmds.push({ id: `t-${i}`, label: r.name, group: "Traces", hint: r.timestamp, run: () => { setActiveId(r.id); setView("tracing"); } })
+    );
+    cmds.push({ id: "v-trace", label: "Tracing", group: "Views", run: () => setView("tracing") });
+    cmds.push({ id: "v-det", label: "Detectors", group: "Views", run: () => setView("detectors") });
+    cmds.push({ id: "v-dash", label: "Dashboard", group: "Views", run: () => setView("dashboard") });
+    if (demo.finding) {
+      if (demo.fixPr) cmds.push({ id: "a-pr", label: `Open fix PR #${demo.fixPr.number}`, group: "Actions", run: () => setModal("fixpr") });
+      cmds.push({ id: "a-graph", label: "Open causal graph", group: "Actions", run: () => setModal("graph") });
+    }
+    return cmds;
+  }, [demo]);
 
   const navItems: { id: View; label: string; Icon: typeof Activity }[] = [
     { id: "tracing", label: "Tracing", Icon: Activity },
@@ -196,6 +212,7 @@ export default function IncidentPage({ params }: PageProps) {
                   placeholder="Search…"
                   className="flex-1 bg-transparent outline-none font-mono text-[11px] text-zinc-200 placeholder:text-zinc-600"
                 />
+                <kbd className="font-mono text-[9px] text-zinc-600 border border-white/10 rounded px-1 py-0.5 flex-shrink-0">⌘K</kbd>
               </div>
             </div>
             <div className="flex-1 overflow-auto">
@@ -290,6 +307,8 @@ export default function IncidentPage({ params }: PageProps) {
       ) : (
         <DashboardView demos={demos} onOpen={openIncident} />
       )}
+
+      <CommandPalette commands={commands} />
 
       {/* ── Modals ── */}
       {modal && (
