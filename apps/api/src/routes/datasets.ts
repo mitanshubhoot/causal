@@ -16,8 +16,19 @@ const CreateDatasetSchema = z.object({
   description: z.string().max(2000).optional(),
 });
 
+// A golden case's input is opaque JSON (object, array, or plain text), but it
+// must actually be there: a bare `z.unknown()` field is optional in zod, so
+// POSTing `{}` used to file an empty case with no input into the dataset.
+const nonEmptyJson = (v: unknown): boolean => {
+  if (v === undefined || v === null) return false;
+  if (typeof v === "string") return v.trim().length > 0;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "object") return Object.keys(v as object).length > 0;
+  return true;
+};
+
 const AddItemSchema = z.object({
-  input: z.unknown(),
+  input: z.unknown().refine(nonEmptyJson, "input is required"),
   expected: z.unknown().optional(),
   spanSignature: z.string().max(300).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
@@ -63,6 +74,7 @@ const datasetsPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.post<{ Params: { id: string }; Body: unknown }>("/datasets/:id/items", async (request, reply) => {
     const { orgId, role } = request.authUser;
     if (role === "viewer") return reply.forbidden("Read-only credentials cannot add cases");
+    if (!isUuid(request.params.id)) return reply.notFound("Dataset not found");
     const parsed = AddItemSchema.safeParse(request.body);
     if (!parsed.success) return reply.badRequest(parsed.error.issues[0]?.message ?? "invalid body");
     const item = await addItem(fastify, orgId, request.params.id, parsed.data as never);
@@ -73,6 +85,7 @@ const datasetsPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.delete<{ Params: { id: string; itemId: string } }>("/datasets/:id/items/:itemId", async (request, reply) => {
     const { orgId, role } = request.authUser;
     if (role === "viewer") return reply.forbidden("Read-only credentials cannot delete cases");
+    if (!isUuid(request.params.id) || !isUuid(request.params.itemId)) return reply.notFound("Case not found");
     const ok = await deleteItem(fastify, orgId, request.params.id, request.params.itemId);
     if (!ok) return reply.notFound("Case not found");
     return { itemId: request.params.itemId, deleted: true };
@@ -84,9 +97,12 @@ const datasetsPlugin: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { orgId, role } = request.authUser;
       if (role === "viewer") return reply.forbidden("Read-only credentials cannot promote findings");
+      if (!isUuid(request.params.id)) return reply.notFound("Finding not found");
+      const datasetId = (request.body ?? {}).datasetId ?? null;
+      if (datasetId !== null && !isUuid(datasetId)) return reply.badRequest("datasetId must be a uuid");
       const result = await promoteFinding(fastify, orgId, {
         findingId: request.params.id,
-        datasetId: (request.body ?? {}).datasetId ?? null,
+        datasetId,
       });
       if (!result) return reply.notFound("Finding not found");
       return reply.code(result.created ? 201 : 200).send(result);
@@ -99,6 +115,7 @@ const datasetsPlugin: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { orgId, role } = request.authUser;
       if (role === "viewer") return reply.forbidden("Read-only credentials cannot start eval runs");
+      if (!isUuid(request.params.id)) return reply.notFound("Dataset not found");
       const run = await runEval(fastify, orgId, {
         datasetId: request.params.id,
         name: (request.body ?? {}).name ?? null,
@@ -111,12 +128,16 @@ const datasetsPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.get<{ Querystring: { datasetId?: string; limit?: string } }>("/evals", async (request) => {
     const { orgId } = request.authUser;
     const limit = Math.min(Number(request.query.limit) || 100, 500);
-    const runs = await listEvalRuns(fastify, orgId, request.query.datasetId ?? null, limit);
+    const datasetId = request.query.datasetId;
+    // An unknown/garbage dataset filter has no runs — that's an empty list, not a crash.
+    if (datasetId && !isUuid(datasetId)) return { runs: [], count: 0 };
+    const runs = await listEvalRuns(fastify, orgId, datasetId ?? null, limit);
     return { runs, count: runs.length };
   });
 
   fastify.get<{ Params: { id: string } }>("/evals/:id", async (request, reply) => {
     const { orgId } = request.authUser;
+    if (!isUuid(request.params.id)) return reply.notFound("Eval run not found");
     const run = await getEvalRun(fastify, orgId, request.params.id);
     if (!run) return reply.notFound("Eval run not found");
     return run;
