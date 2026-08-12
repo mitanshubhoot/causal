@@ -9,6 +9,9 @@ import {
 import { ProvenanceExplorer } from "@/components/ProvenanceExplorer";
 import { getMockTrace } from "@/lib/mock-data";
 import { getObservabilityDemo, getTraceList, getAllDemos } from "@/lib/mock-observability";
+import type { ObservabilityDemo, IncidentDemo, TraceRow } from "@/lib/mock-observability";
+import { fetchTraceList, fetchTraceDetail, fetchRca, LIVE_TRACES } from "@/lib/traces-api";
+import { mapLiveToDemo, mapLiveRow } from "@/lib/live-traces";
 import { LogoMark } from "@/components/LogoMark";
 import { TraceTree } from "@/components/product/TraceTree";
 import { Timeline } from "@/components/product/Timeline";
@@ -38,6 +41,53 @@ function defaultSpanId(demo: ReturnType<typeof getObservabilityDemo>): string {
   );
 }
 
+interface LiveData {
+  demo: ObservabilityDemo;
+  demos: IncidentDemo[];
+  traceRows: TraceRow[];
+}
+
+/** When NEXT_PUBLIC_USE_LIVE_TRACES=1, load the explorer from the live API and
+ *  map it into the shapes the UI already renders. Returns null (→ mock) when the
+ *  flag is off or any fetch fails, so the demo never breaks. */
+function useLiveExplorer(activeId: string): LiveData | null {
+  const [state, setState] = useState<LiveData | null>(null);
+  useEffect(() => {
+    if (!LIVE_TRACES) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await fetchTraceList();
+        const traceRows: TraceRow[] = list.map(mapLiveRow);
+        const demos: IncidentDemo[] = [];
+        for (const row of list.filter((t) => t.status !== "ok")) {
+          try {
+            const [d, rca] = [await fetchTraceDetail(row.id), await fetchRca(row.id)];
+            const mapped = mapLiveToDemo(d, rca);
+            if (mapped.finding) demos.push(mapped as IncidentDemo);
+          } catch {
+            /* skip this incident */
+          }
+        }
+        let demo: ObservabilityDemo | null = null;
+        try {
+          const d = await fetchTraceDetail(activeId);
+          demo = mapLiveToDemo(d, await fetchRca(activeId));
+        } catch {
+          /* fall back to mock for the active trace */
+        }
+        if (!cancelled) setState({ demo: demo ?? getObservabilityDemo(activeId), demos, traceRows });
+      } catch {
+        if (!cancelled) setState(null); // whole load failed → mock
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId]);
+  return state;
+}
+
 const REPO_URL = "https://github.com/mitanshubhoot/causal";
 
 export default function IncidentPage({ params }: PageProps) {
@@ -50,12 +100,15 @@ export default function IncidentPage({ params }: PageProps) {
   const [treeMode, setTreeMode] = useState<"trace" | "timeline">("trace");
   const [wsOpen, setWsOpen] = useState(false);
 
-  const demo = getObservabilityDemo(activeId);
-  const demos = getAllDemos();
+  const live = useLiveExplorer(activeId);
+  const demo = live?.demo ?? getObservabilityDemo(activeId);
+  const demos = live?.demos ?? getAllDemos();
+  const traceRows = live?.traceRows ?? getTraceList();
 
   useEffect(() => {
-    setSelectedSpanId(defaultSpanId(getObservabilityDemo(activeId)));
-  }, [activeId]);
+    setSelectedSpanId(defaultSpanId(demo));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demo.traceId]);
 
   // Esc closes any open modal / dropdown.
   useEffect(() => {
@@ -97,15 +150,15 @@ export default function IncidentPage({ params }: PageProps) {
         status: d.spans.find((s) => s.kind === "agent")?.status ?? "ok",
       }));
     } else {
-      rows = getTraceList().map((r) => ({ id: r.id, name: r.name, sub: r.timestamp, status: r.status }));
+      rows = traceRows.map((r) => ({ id: r.id, name: r.name, sub: r.timestamp, status: r.status }));
     }
     const q = search.trim().toLowerCase();
     return q ? rows.filter((r) => r.name.toLowerCase().includes(q) || r.sub.toLowerCase().includes(q)) : rows;
-  }, [listTab, search, demos]);
+  }, [listTab, search, demos, traceRows]);
 
   const commands = useMemo<Command[]>(() => {
     const cmds: Command[] = [];
-    getTraceList().forEach((r, i) =>
+    traceRows.forEach((r, i) =>
       cmds.push({ id: `t-${i}`, label: r.name, group: "Traces", hint: r.timestamp, run: () => { setActiveId(r.id); setView("tracing"); } })
     );
     cmds.push({ id: "v-trace", label: "Tracing", group: "Views", run: () => setView("tracing") });
@@ -116,7 +169,7 @@ export default function IncidentPage({ params }: PageProps) {
       cmds.push({ id: "a-graph", label: "Open causal graph", group: "Actions", run: () => setModal("graph") });
     }
     return cmds;
-  }, [demo]);
+  }, [demo, traceRows]);
 
   const navItems: { id: View; label: string; Icon: typeof Activity }[] = [
     { id: "tracing", label: "Tracing", Icon: Activity },

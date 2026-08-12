@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { getTrace } from "./traces.js";
+import { openFixPr, type PrResult } from "./github-pr.js";
 import { config } from "../config.js";
 
 const IS_DEMO = !config.ANTHROPIC_API_KEY || config.ANTHROPIC_API_KEY.startsWith("sk-ant-...");
@@ -142,8 +143,30 @@ export async function runRca(fastify: FastifyInstance, orgId: string, traceId: s
     )
     RETURNING id
   `) as Array<{ id: string }>;
+  const rcaId = rows[0]?.id;
 
-  return { rcaId: rows[0]?.id, ...rca, prStatus: "proposed" };
+  // Attempt to open a real fix PR (no-op unless a GitHub App + repo mapping
+  // exist); persist the outcome on the run.
+  let pr: PrResult = { prStatus: "proposed" };
+  if (rcaId) {
+    pr = await openFixPr(fastify, orgId, {
+      id: rcaId,
+      summary: rca.summary,
+      explanation: rca.explanation,
+      counterfactual: rca.counterfactual,
+      file: rca.file,
+      fixTitle: rca.fixTitle,
+      fixDescription: rca.fixDescription,
+    });
+    if (pr.prStatus === "opened") {
+      await fastify.pg`
+        UPDATE rca_runs SET pr_status = ${pr.prStatus}, pr_url = ${pr.prUrl ?? null}, pr_number = ${pr.prNumber ?? null}
+        WHERE id = ${rcaId}
+      `;
+    }
+  }
+
+  return { rcaId, ...rca, prStatus: pr.prStatus, prUrl: pr.prUrl, prNumber: pr.prNumber };
 }
 
 /** Fetch the latest RCA run for a trace. */
