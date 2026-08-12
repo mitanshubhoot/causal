@@ -101,14 +101,19 @@ export default function IncidentPage({ params }: PageProps) {
   const [search, setSearch] = useState("");
   const [treeMode, setTreeMode] = useState<"trace" | "timeline">("trace");
   const [wsOpen, setWsOpen] = useState(false);
-  // Pane visibility — lets the trace tree take the full width when needed.
+  // Pane visibility. The Copilot is the point of the product, so it is open by
+  // default: inline from xl, and as a drawer below that. Its toggle is ALWAYS
+  // visible, so it can never become unreachable.
+  //
+  // Five fixed panes don't fit at xl, so the traces LIST is what yields — it
+  // starts collapsed until 2xl, leaving the trace tree real room. Both toggles
+  // sit in the trace header, and TraceActions collapses to a dropdown whenever
+  // the tree pane is too narrow for full buttons.
   const [showList, setShowList] = useState(true);
-  // Only default the Copilot open where it fits inline (2xl). On narrower
-  // screens it opens as a drawer, on demand — but the toggle is ALWAYS
-  // available, so it can never become unreachable.
   const [showCopilot, setShowCopilot] = useState(false);
   useEffect(() => {
-    setShowCopilot(window.matchMedia("(min-width: 1536px)").matches);
+    setShowCopilot(window.matchMedia("(min-width: 1280px)").matches);
+    setShowList(window.matchMedia("(min-width: 1536px)").matches);
   }, []);
 
   const live = useLiveExplorer(activeId);
@@ -405,10 +410,10 @@ export default function IncidentPage({ params }: PageProps) {
             <>
               <div
                 onClick={() => setShowCopilot(false)}
-                className="fixed inset-0 z-30 bg-black/50 2xl:hidden"
+                className="fixed inset-0 z-30 bg-black/50 xl:hidden"
                 aria-hidden
               />
-              <section className="fixed inset-y-0 right-0 z-40 w-[min(380px,90vw)] flex flex-col border-l border-white/10 bg-[#0c0c0e] shadow-2xl 2xl:static 2xl:z-auto 2xl:w-[340px] 2xl:shadow-none 2xl:border-l-0 flex-shrink-0">
+              <section className="fixed inset-y-0 right-0 z-40 w-[min(380px,90vw)] flex flex-col border-l border-white/10 bg-[#0c0c0e] shadow-2xl xl:static xl:z-auto xl:w-[320px] xl:shadow-none xl:border-l-0 flex-shrink-0">
                 <Copilot demo={demo} onClose={() => setShowCopilot(false)} />
               </section>
             </>
