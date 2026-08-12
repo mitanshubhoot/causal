@@ -186,7 +186,7 @@ export default function IncidentPage({ params }: PageProps) {
   return (
     <div className="h-full flex bg-[#0a0a0b] text-zinc-300 overflow-hidden">
       {/* ── Nav rail ── */}
-      <aside className="hidden lg:flex w-[186px] flex-col border-r border-white/[0.06] flex-shrink-0">
+      <aside className="hidden lg:flex w-[176px] flex-col border-r border-white/[0.06] flex-shrink-0">
         <Link href="/" className="flex items-center gap-2 px-4 h-12 border-b border-white/[0.06] hover:bg-white/[0.02] transition-colors">
           <LogoMark size={20} />
           <span className="text-[14px] font-semibold text-zinc-100 tracking-tight">Causal</span>
@@ -222,7 +222,7 @@ export default function IncidentPage({ params }: PageProps) {
       {view === "tracing" ? (
         <>
           {/* ── Traces list ── */}
-          <aside className={`${showList ? "hidden md:flex" : "hidden"} w-[248px] flex-col border-r border-white/[0.06] flex-shrink-0`}>
+          <aside className={`${showList ? "hidden lg:flex" : "hidden"} w-[224px] flex-col border-r border-white/[0.06] flex-shrink-0`}>
             <div className="relative">
               <button
                 onClick={() => setWsOpen((v) => !v)}
@@ -305,7 +305,7 @@ export default function IncidentPage({ params }: PageProps) {
               <button
                 onClick={() => setShowList((v) => !v)}
                 title={showList ? "Hide traces list" : "Show traces list"}
-                className={`hidden md:block flex-shrink-0 transition-colors ${showList ? "text-zinc-500 hover:text-zinc-300" : "text-indigo-300/80"}`}
+                className={`hidden lg:block flex-shrink-0 transition-colors ${showList ? "text-zinc-500 hover:text-zinc-300" : "text-indigo-300/80"}`}
               >
                 <PanelLeft className="w-3.5 h-3.5" />
               </button>
@@ -335,7 +335,7 @@ export default function IncidentPage({ params }: PageProps) {
               <button
                 onClick={() => setShowCopilot((v) => !v)}
                 title={showCopilot ? "Hide Copilot" : "Show Copilot"}
-                className={`hidden xl:block flex-shrink-0 transition-colors ${showCopilot ? "text-zinc-500 hover:text-zinc-300" : "text-indigo-300/80"}`}
+                className={`hidden 2xl:block flex-shrink-0 transition-colors ${showCopilot ? "text-zinc-500 hover:text-zinc-300" : "text-indigo-300/80"}`}
               >
                 <PanelRight className="w-3.5 h-3.5" />
               </button>
@@ -378,7 +378,7 @@ export default function IncidentPage({ params }: PageProps) {
           </section>
 
           {/* ── Span detail ── */}
-          <section className="hidden md:flex w-[340px] flex-col border-r border-white/[0.06] flex-shrink-0">
+          <section className="hidden md:flex w-[320px] flex-col border-r border-white/[0.06] flex-shrink-0">
             <SpanDetail
               span={selectedSpan}
               trace={{ repo: demo.repo, gitRef: demo.gitRef, user: demo.user, sessionId: demo.sessionId, metadata: demo.metadata }}
@@ -386,7 +386,7 @@ export default function IncidentPage({ params }: PageProps) {
           </section>
 
           {/* ── Copilot ── */}
-          <section className={`${showCopilot ? "hidden xl:flex" : "hidden"} w-[360px] flex-col flex-shrink-0`}>
+          <section className={`${showCopilot ? "hidden 2xl:flex" : "hidden"} w-[340px] flex-col flex-shrink-0`}>
             <Copilot demo={demo} onOpenFixPr={() => setModal("fixpr")} onOpenGraph={() => setModal("graph")} />
           </section>
         </>

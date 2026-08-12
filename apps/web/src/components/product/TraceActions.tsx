@@ -28,55 +28,51 @@ export function TraceActions({
   const verified = pr?.status === "verified";
 
   return (
-    <div className="flex items-center gap-2 px-3 h-11 border-b border-white/[0.06] flex-shrink-0 overflow-x-auto">
-      <span className="font-mono text-[10px] tracking-[0.14em] uppercase text-zinc-600 flex-shrink-0 mr-1">
-        Actions
-      </span>
-
+    // min-w-0 + a scroll container: the bar must never widen the trace pane,
+    // which previously pushed the whole 5-pane layout past the viewport.
+    <div className="flex items-center gap-1.5 px-3 h-10 border-b border-white/[0.06] flex-shrink-0 min-w-0 overflow-x-auto">
       {pr && (
         <button
           onClick={onOpenFixPr}
-          className="inline-flex items-center gap-1.5 flex-shrink-0 font-mono text-[11px] rounded-md border px-2.5 py-1.5 transition-colors text-emerald-300 border-emerald-500/25 bg-emerald-500/[0.06] hover:bg-emerald-500/[0.12]"
+          title={`Fix PR #${pr.number} — ${verified ? "causal-replay passed" : "not yet verified"}`}
+          className="inline-flex items-center gap-1.5 flex-shrink-0 font-mono text-[11px] rounded-md border px-2 py-1 transition-colors text-emerald-300 border-emerald-500/25 bg-emerald-500/[0.06] hover:bg-emerald-500/[0.12]"
         >
           <GitPullRequest className="w-3.5 h-3.5" />
-          Fix PR #{pr.number}
-          <span
-            className={`ml-1 inline-flex items-center gap-1 font-mono text-[9px] tracking-[0.08em] uppercase px-1.5 py-0.5 rounded border ${
-              verified
-                ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-                : "text-amber-400 border-amber-500/30 bg-amber-500/10"
-            }`}
-          >
-            {verified ? <Check className="w-2.5 h-2.5" /> : <Clock className="w-2.5 h-2.5" />}
-            {verified ? "verified" : "unverified"}
-          </span>
+          <span className="hidden sm:inline">Fix PR</span> #{pr.number}
+          {verified ? (
+            <Check className="w-3 h-3 text-emerald-400" />
+          ) : (
+            <Clock className="w-3 h-3 text-amber-400" />
+          )}
         </button>
       )}
 
       <button
         onClick={onOpenGraph}
-        className="inline-flex items-center gap-1.5 flex-shrink-0 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2.5 py-1.5 hover:border-white/25 hover:bg-white/[0.03] transition-colors"
+        title="Causal graph — the six-layer provenance chain for this failure"
+        className="inline-flex items-center gap-1.5 flex-shrink-0 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2 py-1 hover:border-white/25 hover:bg-white/[0.03] transition-colors"
       >
         <Waypoints className="w-3.5 h-3.5 text-indigo-300/80" />
-        Causal graph
+        <span className="hidden lg:inline">Causal graph</span>
       </button>
 
       <Link
         href={`/incidents/${demo.incidentId}/postmortem`}
-        className="inline-flex items-center gap-1.5 flex-shrink-0 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2.5 py-1.5 hover:border-white/25 hover:bg-white/[0.03] transition-colors"
+        title="Generate the post-mortem for this incident"
+        className="inline-flex items-center gap-1.5 flex-shrink-0 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2 py-1 hover:border-white/25 hover:bg-white/[0.03] transition-colors"
       >
         <FileText className="w-3.5 h-3.5" />
-        Post-mortem
+        <span className="hidden lg:inline">Post-mortem</span>
       </Link>
 
       {demo.finding && (
         <button
           onClick={onPromote}
           title="Turn this finding into a golden case so every release is tested against it"
-          className="inline-flex items-center gap-1.5 flex-shrink-0 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2.5 py-1.5 hover:border-white/25 hover:bg-white/[0.03] transition-colors"
+          className="inline-flex items-center gap-1.5 flex-shrink-0 font-mono text-[11px] text-zinc-300 border border-white/10 rounded-md px-2 py-1 hover:border-white/25 hover:bg-white/[0.03] transition-colors"
         >
           <Database className="w-3.5 h-3.5 text-amber-300/80" />
-          Add to eval set
+          <span className="hidden lg:inline">Add to eval set</span>
         </button>
       )}
     </div>
