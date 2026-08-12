@@ -182,7 +182,9 @@ const providersPlugin: FastifyPluginAsync = async (fastify) => {
       if (!check.ok) {
         // The provider's own message ("invalid x-api-key", "model not found")
         // is far more actionable than a generic 400. It is scrubbed of the key.
-        return reply.badRequest(`${PROVIDER_INFO[provider].label} rejected the credential — ${check.error}`);
+        return reply.badRequest(
+          `${PROVIDER_INFO[provider].label} rejected the credential — ${check.error ?? "unknown error"}`
+        );
       }
       validatedWith = check.model;
     }

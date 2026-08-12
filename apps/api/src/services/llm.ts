@@ -565,7 +565,11 @@ export async function validateProviderKey(opts: {
   credential: string;
   model?: string | null;
   timeoutMs?: number;
-}): Promise<{ ok: true; model: string } | { ok: false; error: string }> {
+  // NOTE: deliberately a flat shape, not a discriminated union. Vercel's
+  // TypeScript analyzer runs with different strictness than our tsconfig and
+  // does not narrow `{ok:true}|{ok:false}` on `if (!x.ok)`, which fails the
+  // deploy even though `tsc` is clean locally.
+}): Promise<{ ok: boolean; model: string | null; error: string | null }> {
   const model = (opts.model ?? "").trim() || PROVIDER_INFO[opts.provider].fastModel;
   try {
     await callProvider(opts.provider, opts.credential, {
@@ -575,10 +579,10 @@ export async function validateProviderKey(opts: {
       timeoutMs: opts.timeoutMs ?? VALIDATE_TIMEOUT_MS,
       system: "Reply with the single word OK.",
     });
-    return { ok: true, model };
+    return { ok: true, model, error: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: scrubSecret(message, opts.credential).slice(0, 400) };
+    return { ok: false, model: null, error: scrubSecret(message, opts.credential).slice(0, 400) };
   }
 }
 
