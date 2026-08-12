@@ -19,6 +19,7 @@ import {
   Webhook,
   Search,
   Shield,
+  Waypoints,
   Zap,
   FileText,
   Cpu,
@@ -1556,6 +1557,7 @@ function FeaturesSection() {
     { icon: GitBranch, title: "Git-linked spans", description: "Every span carries the file, line, and commit that produced it — so a failure is one click from the code that caused it.", href: incident, see: "See a git-linked span" },
     { icon: Search, title: "Signal, not noise", description: "Traces are scored on error, latency, cost, retry loops and whether a failure is actionable. The ones that matter surface; the rest are sampled away.", href: "/incidents", see: "Browse incidents" },
     { icon: Shield, title: "LLM-as-judge detectors", description: "Continuous evaluation for hallucination, tool and logic failures, intent drift, and safety violations — scored on every trace, not just the ones that already errored.", href: "/detectors", see: "See the detectors" },
+    { icon: Waypoints, title: "Trust boundaries", description: "Every span is labelled with where its bytes came from and what it can do, so untrusted content reaching an egress tool with private data in scope is a graph query — not a prompt scan. Blocked and succeeded are both on the record.", href: "/security", see: "Open the security console" },
     { icon: Cpu, title: "Agentic RCA", description: "An AI agent works in a sandbox with your source: real git blame and pickaxe to find the commit that introduced the failure, explained with a counterfactual.", href: incident, see: "Read an RCA" },
     { icon: GitBranch, title: "Commits, PRs and issues", description: "A failure is correlated not just to the commit but to the pull request that shipped it, the issues it closed, and open issues that already describe it.", href: incident, see: "See the correlation" },
     { icon: Code2, title: "Verified fix PRs", description: "Causal writes the fix and opens a pull request — diff, description, and a causal-replay check that runs your tests against the patch before claiming it's resolved.", href: incident, see: "Open a fix PR" },
@@ -1620,6 +1622,17 @@ function FeaturesSection() {
               </motion.div>
             );
           })}
+          {/* The 1px "gaps" are this container's own background showing between
+              black cards, so a partial last row would paint its empty cells as a
+              grey block. Filling them with the card colour keeps the grid ending
+              cleanly at any card count. */}
+          {features.length % 3 !== 0 && (
+            <div
+              aria-hidden
+              className="hidden lg:block bg-black"
+              style={{ gridColumn: `span ${3 - (features.length % 3)}` }}
+            />
+          )}
         </motion.div>
       </div>
     </section>

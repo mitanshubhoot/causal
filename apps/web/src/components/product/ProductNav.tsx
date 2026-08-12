@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogoMark } from "@/components/LogoMark";
-import { Activity, Eye, Database, LayoutGrid, Github, ArrowLeft } from "lucide-react";
+import { Activity, Eye, Shield, Database, LayoutGrid, Github, ArrowLeft } from "lucide-react";
 
 const REPO_URL = "https://github.com/mitanshubhoot/causal";
 
@@ -18,6 +18,10 @@ const REPO_URL = "https://github.com/mitanshubhoot/causal";
 export const NAV_ITEMS = [
   { href: "/incidents", label: "Tracing", Icon: Activity, match: /^\/incidents/ },
   { href: "/detectors", label: "Detectors", Icon: Eye, match: /^\/detectors/ },
+  // Security sits with the detection surfaces, not at the end after Dashboard:
+  // it is the fifth capability, and `Shield` is the rail glyph. `ShieldAlert`
+  // stays reserved for critical rows inside the view.
+  { href: "/security", label: "Security", Icon: Shield, match: /^\/security/ },
   { href: "/evals", label: "Datasets & Evals", Icon: Database, match: /^\/evals/ },
   { href: "/dashboard", label: "Dashboard", Icon: LayoutGrid, match: /^\/dashboard/ },
 ] as const;
