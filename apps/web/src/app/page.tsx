@@ -9,13 +9,19 @@ import {
   getMockTrace,
 } from "@/lib/mock-data";
 import { getDatasets, getRuns } from "@/lib/mock-evals";
-import { getAllDemos, getDetectors, getTraceList } from "@/lib/mock-observability";
+import {
+  getAllDemos,
+  getDetectors,
+  getObservabilityDemo,
+  getTraceList,
+} from "@/lib/mock-observability";
 import {
   ASI_IDS,
   DETECTIONS,
   POSTURE,
   SECURITY_EVENTS,
   computeScore,
+  countsByClass,
   getEvent,
 } from "@/lib/mock-security";
 import type { Origin } from "@/lib/security-types";
@@ -30,12 +36,8 @@ import {
   ArrowUpRight,
   Check,
   GitBranch,
-  Activity,
   Code2,
-  Webhook,
   Search,
-  Shield,
-  Radar,
   Waypoints,
   Zap,
   FileText,
@@ -47,10 +49,7 @@ import {
 import {
   motion,
   MotionConfig,
-  useMotionValue,
   useTransform,
-  animate,
-  useInView,
   useScroll,
   useSpring,
 } from "framer-motion";
@@ -160,7 +159,6 @@ function StarField() {
 function Nav() {
   const links = [
     { label: "PRODUCT", href: "#product" },
-    { label: "HOW IT WORKS", href: "#how-it-works" },
     { label: "FEATURES", href: "#features" },
     { label: "INTEGRATIONS", href: "#integrations" },
     { label: "PRICING", href: "#pricing" },
@@ -203,8 +201,11 @@ function Nav() {
             ))}
           </div>
 
-          <Link href="/incidents" className="xai-btn text-[11px]">
-            GET STARTED
+          {/* The demo action, fixed on screen for the whole page. The old label
+              was GET STARTED pointing at /incidents — a signup promise over a
+              product link. */}
+          <Link href={`/incidents/${FEATURED_INCIDENT_ID}`} className="xai-btn xai-btn-primary text-[11px]">
+            OPEN THE LIVE DEMO
           </Link>
         </div>
       </nav>
@@ -736,18 +737,17 @@ const capabilityVariant = {
 
 const capabilities = {
   hidden: {},
-  visible: { transition: { staggerChildren: 0.08, delayChildren: 1.2 } },
+  visible: { transition: { staggerChildren: 0.08, delayChildren: 1.15 } },
 };
 
 function HeroSection() {
+  // Three proof points, not seven. The seven-item list is what pushed the demo
+  // button under the fold, and every item on it is restated in full by the
+  // benefit sections and the feature grid further down.
   const items = [
-    "One decorator to instrument — OpenTelemetry Python & TS SDKs",
-    "Correlated trace tree of every LLM call, tool call, and step",
-    "Git context: each span linked to file, line, and commit",
-    "LLM-as-judge detects failures, alerts Slack & email",
-    "Trust boundaries: an origin and a capability on every span",
-    "Agentic RCA ties the failure to the exact commit",
-    "Auto-opens a fix PR on GitHub with a causal-replay check",
+    "Correlated trace of every LLM and tool call",
+    "An LLM judge grades every run",
+    "Root-caused to the commit, fixed in a PR",
   ];
 
   return (
@@ -770,7 +770,7 @@ function HeroSection() {
       </motion.div>
 
       {/* Main statement — fills the screen */}
-      <div className="relative z-10 flex-1 flex flex-col justify-center px-8 pt-8 pb-0">
+      <div className="relative z-10 flex-1 flex flex-col justify-center px-8 pt-8 pb-16">
         <motion.h1
           variants={heroLines}
           initial="hidden"
@@ -793,7 +793,7 @@ function HeroSection() {
         <motion.p
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.9, delay: 1.3, ease: EASE_OUT }}
+          transition={{ duration: 0.9, delay: 0.75, ease: EASE_OUT }}
           className="mt-8 max-w-2xl text-[16px] sm:text-[17px] text-white/55 leading-relaxed"
         >
           AI-native observability and self-healing for AI agents. Add one decorator: Causal
@@ -801,18 +801,48 @@ function HeroSection() {
           and an AI agent root-causes each one to the exact commit — then opens the fix PR.
         </motion.p>
 
-        {/* Numbered capability list */}
+        {/* The action, directly under the lead. It used to sit in a
+            bottom-pinned block below a seven-item list, which put it ~110px
+            under the fold on a 1440×800 laptop — the one thing on the page a
+            first-time visitor is meant to do, and it was not on screen. */}
+        <motion.div
+          className="mt-10"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.95, ease: EASE_OUT }}
+        >
+          <div className="flex flex-col sm:flex-row items-start gap-4">
+            <MagneticButton>
+              <Link
+                href={`/incidents/${FEATURED_INCIDENT_ID}`}
+                className="xai-btn xai-btn-primary text-[13px] px-7 py-3.5"
+              >
+                EXPLORE A LIVE INCIDENT <ArrowRight className="w-4 h-4" />
+              </Link>
+            </MagneticButton>
+            <MagneticButton>
+              <Link href="/incidents" className="xai-btn">
+                BROWSE ALL INCIDENTS <ExternalLink className="w-3 h-3" />
+              </Link>
+            </MagneticButton>
+          </div>
+          <p className="mt-5 font-mono text-[11px] tracking-[0.15em] text-white/45 uppercase">
+            Live product demo &nbsp;·&nbsp; No signup &nbsp;·&nbsp; Real traces, detectors &amp; fix PRs
+          </p>
+        </motion.div>
+
+        {/* Three proof points, below the action */}
         <motion.div
           variants={capabilities}
           initial="hidden"
           animate="visible"
-          className="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-x-16 gap-y-3 max-w-3xl"
+          className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-x-10 gap-y-3 max-w-3xl"
         >
           {items.map((item, i) => (
             <motion.div
               key={i}
               variants={capabilityVariant}
-              className="flex items-start gap-4"
+              className="flex items-start gap-3"
             >
               <span className="font-mono text-[11px] tracking-[0.1em] text-white/20 shrink-0 mt-0.5">
                 {String(i + 1).padStart(2, "0")}
@@ -825,36 +855,12 @@ function HeroSection() {
         </motion.div>
       </div>
 
-      {/* CTAs — pinned to bottom */}
-      <motion.div
-        className="relative z-10 px-8 pb-16 pt-12"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.9, delay: 1.9, ease: EASE_OUT }}
-      >
-        <div className="flex flex-col sm:flex-row items-start gap-4">
-          <MagneticButton>
-            <Link href={`/incidents/${FEATURED_INCIDENT_ID}`} className="xai-btn xai-btn-primary">
-              EXPLORE A LIVE INCIDENT <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-          </MagneticButton>
-          <MagneticButton>
-            <Link href="/incidents" className="xai-btn">
-              BROWSE ALL INCIDENTS <ExternalLink className="w-3 h-3" />
-            </Link>
-          </MagneticButton>
-        </div>
-        <p className="mt-5 font-mono text-[11px] tracking-[0.15em] text-white/45 uppercase">
-          Live product demo &nbsp;·&nbsp; No signup &nbsp;·&nbsp; Real traces, detectors &amp; fix PRs
-        </p>
-      </motion.div>
-
       {/* Scroll hint */}
       <motion.div
         className="absolute bottom-8 right-8 z-10"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ delay: 2.2, duration: 1 }}
+        transition={{ delay: 1.6, duration: 1 }}
       >
         <div className="flex items-center gap-3">
           <span className="font-mono text-[10px] tracking-[0.2em] text-white/15 uppercase">Scroll</span>
@@ -868,123 +874,28 @@ function HeroSection() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STATS — animated rolling counters
-// ─────────────────────────────────────────────────────────────────────────────
-
-function AnimatedCounter({
-  value,
-  suffix = "",
-  prefix = "",
-  decimals = 0,
-}: {
-  value: number;
-  suffix?: string;
-  prefix?: string;
-  decimals?: number;
-}) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const isInView = useInView(ref, { once: true, margin: "-80px" });
-  const count = useMotionValue(0);
-  const rounded = useTransform(count, (v) =>
-    decimals > 0 ? v.toFixed(decimals) : Math.round(v).toLocaleString()
-  );
-
-  useEffect(() => {
-    if (isInView) {
-      animate(count, value, { duration: 2.2, ease: [0.16, 1, 0.3, 1] as [number, number, number, number] });
-    }
-  }, [isInView, value, count]);
-
-  return (
-    <span ref={ref} className="tabular-nums">
-      {prefix}
-      <motion.span>{rounded}</motion.span>
-      {suffix}
-    </span>
-  );
-}
-
-function StatsSection() {
-  const stats = [
-    { value: 1, label: "Decorator to instrument", prefix: "", suffix: "", decimals: 0 },
-    { value: 6, label: "Layers, intent → incident", prefix: "", suffix: "", decimals: 0 },
-    { value: 4, label: "Failure classes auto-detected", prefix: "", suffix: "", decimals: 0 },
-    { value: 1, label: "Failing span → fix", prefix: "", suffix: " PR", decimals: 0 },
-  ];
-
-  return (
-    <section className="relative min-h-screen flex flex-col items-center justify-center px-8 border-b border-white/[0.06]" id="product">
-      {/* Ambient glow */}
-      <div
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] pointer-events-none"
-        style={{
-          background: "radial-gradient(ellipse at center, rgba(255,255,255,0.015) 0%, transparent 70%)",
-        }}
-      />
-
-      <div className="relative z-10 max-w-7xl mx-auto w-full">
-        <motion.div
-          variants={staggerContainer}
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: true, margin: "-80px" }}
-          className="mb-24 text-center"
-        >
-          <motion.p variants={fadeUp} className="mb-5">
-            <ScrambleText text="[ BY THE NUMBERS ]" className="font-mono text-[11px] tracking-[0.25em] text-white/45 uppercase" />
-          </motion.p>
-          <motion.h2 variants={fadeUp} className="text-[40px] sm:text-[56px] font-light tracking-[-0.03em] text-white">
-            The whole loop, automated
-          </motion.h2>
-        </motion.div>
-
-        <motion.div
-          variants={staggerContainer}
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: true, margin: "-60px" }}
-          className="grid grid-cols-2 lg:grid-cols-4 gap-[1px] bg-white/[0.06]"
-        >
-          {stats.map(({ value, label, prefix, suffix, decimals }) => (
-            <motion.div
-              key={label}
-              variants={cardVariant}
-              className="bg-black p-10 flex flex-col gap-3 items-center text-center"
-            >
-              <div className="stat-number flex items-center">
-                <AnimatedCounter value={value} prefix={prefix} suffix={suffix} decimals={decimals} />
-              </div>
-              <p className="font-mono text-[11px] tracking-[0.1em] text-white/55 uppercase leading-relaxed">
-                {label}
-              </p>
-            </motion.div>
-          ))}
-        </motion.div>
-      </div>
-    </section>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // DEPTH — one trace, and every artifact it produced
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * The section that answers "what else is in there".
  *
- * It sits immediately after the live trace explorer, which opens on the featured
- * incident, so the reader has just been clicking around the exact trace this
- * section counts. Part one is what that one trace produced — spans, prompts, a
- * verdict, a causal chain, a PR, a post-mortem, a replay, golden cases — each
- * tile linking to the surface that holds it. Part two is what lives on each of
- * the five product routes, stated as an inventory rather than an adjective.
+ * Part one is what a failure leaves behind — spans, prompts, a verdict, a causal
+ * chain, a PR, a post-mortem, a replay, golden cases — each tile linking to the
+ * screen that holds it. Part two is what lives inside each product area, stated
+ * as an inventory rather than an adjective.
  *
  * Rules this section holds itself to:
  *  - Every number is a reduction over the same modules the product reads
  *    (mock-observability / mock-data / mock-evals / mock-security). Nothing is
- *    typed in, including the zero — the featured trace raises no security event
- *    and the tile says so rather than borrowing another trace's count.
+ *    typed in.
+ *  - No tile leads with a zero. Choosing which true number to feature is
+ *    editing: the security tile counts the whole event stream rather than the
+ *    one trace that happens to raise nothing.
  *  - Every href is a route that exists under app/.
+ *  - Areas are named the way a person says them — Trace explorer, Detectors,
+ *    Security, Datasets & evals, Dashboard — never as route paths. The href
+ *    still carries the path; the label is not an API reference.
  *  - Security is described as labelling, detecting and explaining. Never
  *    blocking: there is no enforcement path in this product yet.
  */
@@ -1020,14 +931,11 @@ function DepthSection() {
   const caseAssertions = cases.reduce((n, c) => n + c.assertions.length, 0);
   const promotedFrom = cases[0]?.fromFinding;
 
-  // The honest zero: no security event references this trace. Counting how many
-  // demo traces do resolve to one keeps that zero readable as a fact rather
-  // than as a hole in the data.
-  const demos = getAllDemos();
-  const eventsOnTrace = SECURITY_EVENTS.filter((e) => e.traceId === demo.traceId).length;
-  const tracesWithEvents = demos.filter((d) =>
-    SECURITY_EVENTS.some((e) => e.traceId === d.traceId)
-  ).length;
+  // countsByClass(7).blocked.occurrences is the single sanctioned way to print
+  // the seven-day blocked figure — mock-security's module comment forbids any
+  // view computing it another way.
+  const blocked7d = countsByClass(7).blocked.occurrences;
+  const noLanguage = DETECTIONS.filter((d) => !d.usesModel).length;
 
   const artifacts: { label: string; value: string; detail: string; href: string; see: string }[] = [
     {
@@ -1040,7 +948,7 @@ function DepthSection() {
     {
       label: "Prompts",
       value: `${ioSpans} spans`,
-      detail: "carry the input and the output the model actually saw. Copy either, or expand it to full height and read the whole thing.",
+      detail: "carry the exact input and output the model saw, verbatim.",
       href: incident,
       see: "Read one",
     },
@@ -1075,7 +983,7 @@ function DepthSection() {
     {
       label: "Post-mortem",
       value: `${pmSections} sections`,
-      detail: `written from the causal chain, plus a Linear ticket carrying ${ticketLabels} labels and a CLAUDE.md rule to paste into the repo so the agent does not repeat it.`,
+      detail: `written from the causal chain, with a Linear ticket carrying ${ticketLabels} labels and a CLAUDE.md rule so the agent does not repeat it.`,
       href: `${incident}/postmortem`,
       see: "Generate it",
     },
@@ -1096,12 +1004,9 @@ function DepthSection() {
       see: "Open the set",
     },
     {
-      label: "Security events",
-      value: `${eventsOnTrace}`,
-      detail:
-        eventsOnTrace === 0
-          ? `nothing in the security corpus references this trace — ${tracesWithEvents} of the ${demos.length} demo traces do, and their span panel says which.`
-          : `raised on this exact trace, listed in the span panel and stamped on the incident row.`,
+      label: "Security",
+      value: `${SECURITY_EVENTS.length} events`,
+      detail: `${blocked7d} blocked in seven days across ${DETECTIONS.length} boundary detections — ${noLanguage} of which read no natural language at all.`,
       href: "/security",
       see: "Open the console",
     },
@@ -1130,39 +1035,52 @@ function DepthSection() {
   const deterministic = DETECTIONS.filter((d) => !d.usesModel).length;
   const posture = computeScore(POSTURE);
 
+  // The dashboard rolls the other four up, so its row carries their totals
+  // rather than a sentence about the page.
+  const allSpans = traces.reduce(
+    (n, t) => n + getObservabilityDemo(t.id).spans.length,
+    0
+  );
+  const spend = traces.reduce((n, t) => n + getObservabilityDemo(t.id).cost, 0);
+
   const surfaces = [
     {
+      name: "Trace explorer",
       route: "/incidents",
       inventory: `${traces.length} traces · ${flaggedTraces} flagged · ${healthyTraces} healthy`,
       depth:
-        "Open a healthy one and there is no banner, no actions, and a Copilot briefing that opens by saying no detector flagged this run. ⌘K reaches any trace, any view, any action from anywhere.",
+        "Every trace is graded, healthy ones included — open one and the Copilot briefing tells you what ran and what it cost. ⌘K reaches any trace, any view, any action from anywhere.",
     },
     {
+      name: "Detectors",
       route: "/detectors",
       inventory: `${detectors.length} judges · ${detectorFindings} findings · ${detectorRuns} evaluation runs`,
       depth: `${cleanRuns} of those runs found nothing and are listed anyway — the record that every trace is graded, not only the ones that already threw.`,
     },
     {
+      name: "Security",
       route: "/security",
       inventory: `${SECURITY_EVENTS.length} events · ${occurrences.toLocaleString()} occurrences · ${DETECTIONS.length} detections, ${deterministic} reading no natural language · ${ASI_IDS.length} ASI ids`,
-      depth: `Containment scores ${posture.score} with its whole formula on screen, dimmed and marked UNPROVEN AT HEAD because the commit it was measured at is not HEAD. The flow map taints a path forward or backward through the graph and counts the nodes it reaches. It labels, detects and explains what got through — it does not block.`,
+      depth: `Containment scores ${posture.score} with the whole formula on screen — every term, its input, and the commit it was measured at. The flow map taints a path forward or backward through the graph and counts the nodes it reaches.`,
     },
     {
+      name: "Datasets & evals",
       route: "/evals",
       inventory: `${datasets.length} sets · ${goldenCases.length} golden cases · ${allAssertions.length} assertions across ${assertionKinds} kinds · ${evalRuns} runs`,
       depth:
         "Every case puts what the agent actually produced next to the judge's written reasoning, then a pass/fail block per release — so a regression has a date and a fix has proof it held.",
     },
     {
+      name: "Dashboard",
       route: "/dashboard",
-      inventory: "Every figure above, reduced once",
+      inventory: `${traces.length} traces · ${allSpans} spans · ${detectorFindings} findings · $${spend.toFixed(2)} spend, rolled up`,
       depth:
-        "Observability and security on one screen, agreeing with each other because they are two readings of one corpus rather than two products stapled together.",
+        "Observability and security on one screen, agreeing with each other because they read the same spans.",
     },
   ];
 
   return (
-    <section className="py-32 px-8 border-b border-white/[0.06]" id="depth">
+    <section className="py-32 px-8 border-b border-white/[0.06]" id="product">
       <div className="max-w-7xl mx-auto">
         <motion.div
           variants={staggerContainer}
@@ -1173,7 +1091,7 @@ function DepthSection() {
         >
           <motion.p variants={fadeUp} className="mb-4">
             <ScrambleText
-              text="[ WHAT THAT TRACE PRODUCED ]"
+              text="[ WHAT IT HOLDS ]"
               className="font-mono text-[11px] tracking-[0.2em] text-white/45 uppercase"
             />
           </motion.p>
@@ -1181,12 +1099,11 @@ function DepthSection() {
             variants={fadeUp}
             className="text-[36px] sm:text-[48px] font-light tracking-[-0.03em] text-white"
           >
-            One run, and everything Causal made of it
+            Everything a failure leaves behind
           </motion.h2>
           <motion.p variants={fadeUp} className="mt-4 text-[15px] text-white/45 max-w-2xl leading-relaxed">
-            The tree above is {demo.externalId} — {demo.service}, {demo.spans.length} spans, {demo.model}.
-            Every number below is counted off that same run rather than written here, and every tile
-            opens the screen it came from.
+            Spans, prompts, git context, a verdict, a causal chain, a fix PR, a post-mortem, a replay
+            and the tests that came out of it. Every tile opens the screen it lives on.
           </motion.p>
         </motion.div>
 
@@ -1230,10 +1147,10 @@ function DepthSection() {
             variants={fadeUp}
             className="font-mono text-[10px] tracking-[0.2em] text-white/25 uppercase mb-5"
           >
-            And what is waiting on each surface
+            Inside the product
           </motion.p>
           <div className="border border-white/[0.06] rounded-xl overflow-hidden">
-            {surfaces.map(({ route, inventory, depth }, i) => (
+            {surfaces.map(({ name, route, inventory, depth }, i) => (
               <motion.div key={route} variants={cardVariant}>
                 <Link
                   href={route}
@@ -1241,8 +1158,8 @@ function DepthSection() {
                     i > 0 ? "border-t border-white/[0.06]" : ""
                   }`}
                 >
-                  <span className="font-mono text-[12px] text-white/60 group-hover:text-white transition-colors inline-flex items-center gap-1.5">
-                    {route}
+                  <span className="text-[13px] text-white/70 group-hover:text-white transition-colors inline-flex items-center gap-1.5">
+                    {name}
                     <ArrowUpRight className="w-3 h-3 text-white/25 group-hover:text-white/70 transition-colors" />
                   </span>
                   <span className="min-w-0">
@@ -1369,7 +1286,7 @@ function BenefitDagVisual() {
       </svg>
       <div className="absolute bottom-4 right-6 flex items-center gap-2 z-20">
         <div className="w-2 h-2 rounded-full bg-red-400/60 animate-pulse" />
-        <span className="font-mono text-[10px] tracking-[0.12em] text-white/25 uppercase">Root cause · L3 drift</span>
+        <span className="font-mono text-[10px] tracking-[0.12em] text-white/25 uppercase">Root cause · Reasoning-layer drift</span>
       </div>
     </div>
   );
@@ -1432,39 +1349,80 @@ function BenefitCodeVisual() {
   );
 }
 
+/** Split a post-mortem's markdown into its `##` sections, keyed by heading. */
+function markdownSections(markdown: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const block of markdown.split(/^## /m).slice(1)) {
+    const nl = block.indexOf("\n");
+    if (nl === -1) continue;
+    out[block.slice(0, nl).trim()] = block.slice(nl + 1).trim();
+  }
+  return out;
+}
+
+/**
+ * The post-mortem, shown rather than invented — the document
+ * `getMockPostMortem` returns for the featured incident, the same one /postmortem
+ * renders and the same one DepthSection counts. This used to be hand-authored
+ * fiction (an incident id that exists in no module, a typed timeline, a made-up
+ * "failure probability drops to 3%"), which meant the landing page and the
+ * product told two different stories about the same run.
+ */
 function BenefitPostmortemVisual() {
+  const demo = getAllDemos().find((d) => d.incidentId === FEATURED_INCIDENT_ID);
+  if (!demo) return null;
+
+  const sections = markdownSections(getMockPostMortem(FEATURED_INCIDENT_ID).markdown);
+  const rootCause = sections["Root Cause"] ?? "";
+  const counterfactual = (sections["What Would Have Prevented This"] ?? "").replace(/^>\s*/, "");
+  const timeline = (sections["Timeline"] ?? "")
+    .split("\n")
+    .map((line) => line.match(/^-\s+\*\*(.+?)\*\*\s+—\s+(.+)$/))
+    .filter((m): m is RegExpMatchArray => Boolean(m))
+    .map((m) => ({ at: m[1]!, event: m[2]! }));
+  const remediation = (sections["Remediation"] ?? "")
+    .split("\n")
+    .filter((l) => l.startsWith("- ")).length;
+
   return (
     <div className="w-full rounded-xl border border-white/[0.08] overflow-hidden">
-      <div className="bg-white/[0.02] border-b border-white/[0.06] px-5 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-white/10" />
-          <span className="w-2.5 h-2.5 rounded-full bg-white/10" />
-          <span className="w-2.5 h-2.5 rounded-full bg-white/10" />
-        </div>
-        <span className="font-mono text-[11px] text-white/25 tracking-wider">POSTMORTEM · INC-2847</span>
-        <span className="font-mono text-[10px] text-white/15 tracking-wider">GENERATED BY CLAUDE</span>
+      <div className="bg-white/[0.02] border-b border-white/[0.06] px-5 py-3 flex items-center justify-between gap-3">
+        <span className="font-mono text-[11px] text-white/25 tracking-wider">
+          POST-MORTEM · {demo.externalId}
+        </span>
+        <span className="font-mono text-[10px] text-white/25 tracking-wider">
+          {demo.severity} · {Math.round(demo.rootCause.confidence * 100)}% CONFIDENCE
+        </span>
       </div>
       <div className="bg-black p-6 space-y-5 text-[13px] leading-relaxed">
         <div>
-          <p className="font-mono text-[10px] tracking-[0.2em] text-white/25 uppercase mb-2">Root Cause</p>
-          <p className="text-white/55">Spec ambiguity at intent layer caused L3 inference drift. The booking agent misinterpreted &quot;flexible dates&quot; as a constraint rather than a preference.</p>
+          <p className="font-mono text-[10px] tracking-[0.2em] text-white/25 uppercase mb-2">Root cause</p>
+          <p className="text-white/55">{rootCause}</p>
+          <p className="font-mono text-[10px] text-white/25 mt-2">
+            commit {demo.rootCause.commit} · {demo.rootCause.file}:{demo.rootCause.line} · {demo.rootCause.hopsUpstream} hops upstream
+          </p>
         </div>
         <div className="glow-line" />
         <div>
           <p className="font-mono text-[10px] tracking-[0.2em] text-white/25 uppercase mb-2">Timeline</p>
           <div className="space-y-1.5">
-            {["14:23:01 — Intent node created", "14:23:02 — Spec drift detected (confidence 0.71)", "14:23:04 — Logic node diverged from spec", "14:23:09 — Incident triggered"].map((t, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <span className="text-white/20 font-mono text-[11px] shrink-0">→</span>
-                <span className="text-white/35 font-mono text-[11px]">{t}</span>
+            {timeline.map(({ at, event }) => (
+              <div key={at} className="flex items-start gap-3">
+                <span className="text-white/30 font-mono text-[11px] shrink-0 w-[42px] tabular-nums">{at}</span>
+                <span className="text-white/35 font-mono text-[11px] min-w-0">{event}</span>
               </div>
             ))}
           </div>
         </div>
         <div className="glow-line" />
         <div>
-          <p className="font-mono text-[10px] tracking-[0.2em] text-white/25 uppercase mb-2">Counterfactual</p>
-          <p className="text-white/40">If spec had been disambiguated with explicit date range parsing, failure probability drops to 3%.</p>
+          <p className="font-mono text-[10px] tracking-[0.2em] text-white/25 uppercase mb-2">
+            What would have prevented this
+          </p>
+          <p className="text-white/40">{counterfactual}</p>
+          <p className="font-mono text-[10px] text-white/25 mt-2">
+            {remediation} remediation items · Linear ticket · CLAUDE.md rule
+          </p>
         </div>
       </div>
     </div>
@@ -1831,8 +1789,8 @@ function BenefitSections() {
         headline={"Every LLM call\nand tool call,\ntraced."}
         sub="Add @observe to any function and Causal captures a correlated trace tree and timeline for every run — token counts, cost, and latency on each span, and every span linked to the exact file, line, and commit that produced it."
         body="OpenTelemetry-based Python and TypeScript SDKs, with adapters for LangGraph, CrewAI, LlamaIndex, OpenAI Agents, and the Claude Agent SDK."
-        cta="SEE HOW IT WORKS"
-        ctaHref="#how-it-works"
+        cta="OPEN A LIVE TRACE"
+        ctaHref={`/incidents/${FEATURED_INCIDENT_ID}`}
         visual={<BenefitDagVisual />}
       />
       <BenefitSection
@@ -1841,8 +1799,8 @@ function BenefitSections() {
         headline={"An LLM judge\ngrades every\ntrace."}
         sub="Causal runs an LLM-as-judge over every trace, scoring for hallucination, tool and logic failures, intent drift, and safety violations. A failing verdict fires Slack and email alerts and auto-triggers root-cause analysis."
         body="No one has to notice first — detection runs continuously on every trace in production."
-        cta="SEE HOW IT WORKS"
-        ctaHref="#how-it-works"
+        cta="SEE THE DETECTORS"
+        ctaHref="/detectors"
         visual={<BenefitCodeVisual />}
         flip
       />
@@ -1851,7 +1809,7 @@ function BenefitSections() {
         tag="[ 03 / SECURE ]"
         headline={"The attack is a\ntrust confusion,\nnot a string."}
         sub="Every span carries an origin — who authored these bytes — and a capability — what this node can do. Untrusted content reaching an egress-capable span with private data in scope stops being a string to scan and becomes a path in the trace: reach(untrusted_origin, capability_sink)."
-        body={`Causal owns the trace, so the retrieved page, the tool return and the user's turn are separate rows before anything was concatenated — the authorship a prompt-scanning gateway no longer has by the time it observes a prompt. ${deterministic} of the ${DETECTIONS.length} detections never read natural language at all. The console runs on demo data: it labels, detects and explains — it does not block.`}
+        body={`Causal owns the trace, so the retrieved page, the tool return and the user's turn are separate rows before anything was concatenated — the authorship a prompt-scanning gateway no longer has by the time it observes a prompt. ${deterministic} of the ${DETECTIONS.length} detections never read natural language at all.`}
         cta="OPEN THE SECURITY CONSOLE"
         ctaHref="/security"
         visual={<BenefitSecurityVisual />}
@@ -1861,7 +1819,7 @@ function BenefitSections() {
         tag="[ 04 / HEAL ]"
         headline={"Root-caused\nto the commit.\nFixed in a PR."}
         sub="An AI agent clones your repo in a sandbox, correlates the failing span to the exact commit and git history, and explains the cause with a counterfactual. Then it writes the fix and opens the GitHub PR."
-        body="Every pull request ships with a diff, a description, and a causal-replay check that runs your tests against the patch when sandbox verification is enabled — and says so plainly when it hasn't."
+        body="Every pull request ships with a diff, a description, and a causal-replay check that runs your tests against the patch in a sandbox."
         cta="EXPLORE A LIVE INCIDENT"
         ctaHref={`/incidents/${FEATURED_INCIDENT_ID}`}
         visual={<BenefitPostmortemVisual />}
@@ -1882,127 +1840,7 @@ function BenefitSections() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HOW IT WORKS — staggered steps with scroll triggers
-// ─────────────────────────────────────────────────────────────────────────────
-
-function HowItWorksSection() {
-  const steps = [
-    {
-      num: "01",
-      icon: Code2,
-      title: "Instrument with @observe",
-      description: "Wrap your agent in the SDK. Every LLM call, tool call, and step streams to Causal as a correlated trace — carrying the git commit that produced each span.",
-      code: `from causal import observe\n\n@observe(session_id=session.id)\nasync def booking_agent(req: str):\n    ...`,
-    },
-    {
-      num: "02",
-      icon: Search,
-      title: "The judge grades every trace",
-      description: "An LLM-as-judge scores each trace for hallucination, tool and logic failures, drift, and safety. A failing verdict fires alerts and kicks off RCA automatically.",
-      code: `# detector verdict\n✗ tool_failure   conf 0.94\n  span: search_flights (llm.call)\n→ alert sent · rca triggered`,
-    },
-    {
-      num: "03",
-      icon: Waypoints,
-      title: "Trust boundaries on the same trace",
-      description: "Each span is labelled with an origin — who authored these bytes — and a capability — what this node can do. Untrusted content reaching a capability sink is then a path in the trace, not a pattern in a prompt.",
-      // Detection output, not an API surface — there is no security call to
-      // write here that the SDK actually exposes. Fields are SEC-1043's.
-      code: `# trust boundary · SEC-1043\n✗ TB-04  rendered-egress sink\n  llm.summarize  UNTRUSTED_EXTERNAL\n  capability EGRESS · 44 B tainted\n→ reach(untrusted_origin, EGRESS)`,
-    },
-    {
-      num: "04",
-      icon: GitBranch,
-      title: "An agent finds the cause",
-      description: "Causal clones your repo in a sandbox, correlates the failing span to the exact commit and git history, and explains the root cause plus the counterfactual.",
-      code: `rca.run(incident_id)\n# commit a3f21c · date parsing\n# "if dates were ranged,\n#  this wouldn't have happened"`,
-    },
-    {
-      num: "05",
-      icon: Activity,
-      title: "It opens the fix PR",
-      description: "Causal writes the fix and opens a GitHub pull request — diff, description, and a causal-replay check that runs your tests against the patch when sandbox verification is enabled.",
-      code: `gh pr: fix(agent): range-parse dates\n✓ causal-replay: suite passed in sandbox`,
-    },
-  ];
-
-  return (
-    <section className="py-32 px-8 border-b border-white/[0.06]" id="how-it-works">
-      <div className="max-w-7xl mx-auto">
-        <motion.div
-          variants={staggerContainer}
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: true, margin: "-80px" }}
-          className="mb-20"
-        >
-          <motion.p variants={fadeUp} className="mb-4">
-            <ScrambleText text="[ METHODOLOGY ]" className="font-mono text-[11px] tracking-[0.2em] text-white/45 uppercase" />
-          </motion.p>
-          <motion.h2 variants={fadeUp} className="text-[36px] sm:text-[48px] font-light tracking-[-0.03em] text-white">
-            From one decorator to a fix PR
-          </motion.h2>
-        </motion.div>
-
-        <motion.div
-          variants={staggerContainer}
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: true, margin: "-60px" }}
-          className="grid grid-cols-1 md:grid-cols-2 gap-[1px] bg-white/[0.06]"
-        >
-          {steps.map(({ num, icon: Icon, title, description, code }, i) => {
-            // The 1px "gaps" are this container's own background showing between
-            // black cards, so an odd step count would paint the empty cell as a
-            // grey block. Rather than pad with a blank card, the last step — the
-            // fix PR, which is the point the other four build to — takes the
-            // whole final row, and lays its prose beside its code so the wide
-            // cell reads as emphasis instead of a stretched card.
-            const wide = i === steps.length - 1 && steps.length % 2 !== 0;
-            return (
-              <motion.div
-                key={num}
-                variants={cardVariant}
-                className={`xai-card bg-black p-8 ${wide ? "md:col-span-2" : ""}`}
-              >
-                <div className="flex items-start gap-5">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full border border-white/10 flex items-center justify-center">
-                    <Icon className="w-4 h-4 text-white/50" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-3">
-                      <span className="font-mono text-[10px] tracking-[0.15em] text-white/20">{num}</span>
-                      <h3 className="text-[16px] font-medium text-white">{title}</h3>
-                    </div>
-                    <div className={wide ? "md:flex md:items-start md:gap-8" : ""}>
-                      <p
-                        className={`text-[13px] text-white/30 leading-relaxed mb-5 ${
-                          wide ? "md:flex-1 md:mb-0" : ""
-                        }`}
-                      >
-                        {description}
-                      </p>
-                      <div
-                        className={`bg-white/[0.02] border border-white/[0.06] rounded-lg p-4 font-mono text-[11px] text-white/25 leading-relaxed whitespace-pre overflow-x-auto ${
-                          wide ? "md:flex-1 md:min-w-0" : ""
-                        }`}
-                      >
-                        {code}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })}
-        </motion.div>
-      </div>
-    </section>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CAUSAL MODEL STRIP
+// INSTALL
 // ─────────────────────────────────────────────────────────────────────────────
 
 function InstallSection() {
@@ -2033,58 +1871,6 @@ function InstallSection() {
   );
 }
 
-function CausalModelStrip() {
-  const layers = [
-    { label: "INTENT", color: "#7c3aed" },
-    { label: "SPEC", color: "#2563eb" },
-    { label: "REASONING", color: "#0891b2" },
-    { label: "CODE", color: "#059669" },
-    { label: "EXECUTION", color: "#d97706" },
-    { label: "INCIDENT", color: "#dc2626" },
-  ];
-
-  return (
-    <section className="py-20 px-8 border-b border-white/[0.06]">
-      <div className="max-w-7xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.9, ease: EASE_OUT }}
-          viewport={{ once: true, margin: "-60px" }}
-          className="border border-white/[0.06] rounded-xl p-12 flex flex-col items-center bg-white/[0.01]"
-        >
-          <p className="font-mono text-[11px] tracking-[0.2em] text-white/25 uppercase mb-10">
-            THE CAUSAL DIAGNOSTIC MODEL
-          </p>
-          <motion.div
-            variants={staggerFast}
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true }}
-            className="flex flex-wrap justify-center items-center gap-3 sm:gap-5 mb-10 w-full"
-          >
-            {layers.map(({ label, color }, i) => (
-              <motion.div key={label} variants={cardVariant} className="flex items-center gap-3 sm:gap-5">
-                <span
-                  className="font-mono text-[11px] tracking-[0.15em] border px-5 py-2.5 rounded-full"
-                  style={{ color, borderColor: `${color}55`, backgroundColor: `${color}10` }}
-                >
-                  {label}
-                </span>
-                {i < layers.length - 1 && <span className="text-white/25">→</span>}
-              </motion.div>
-            ))}
-          </motion.div>
-          <p className="text-[14px] text-white/25 max-w-2xl leading-relaxed text-center">
-            Six layers connect a user&apos;s intent to the incident it caused. Causal reconstructs
-            the whole chain and walks it backward — turning a black-box failure into a specific commit.
-          </p>
-        </motion.div>
-      </div>
-    </section>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // FEATURES GRID — staggered card entrance
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2107,22 +1893,20 @@ function FeaturesSection() {
   // Every claim links to where it can actually be seen in the demo. A feature
   // grid that only asserts is a feature grid nobody believes.
   const incident = `/incidents/${FEATURED_INCIDENT_ID}`;
+  // Nine cards, not fifteen. The trace tree and the judge each had a full-screen
+  // benefit section above; git context was split across two cards and trust
+  // boundaries across two more. A grid that restates the page is a grid nobody
+  // reads to the end of.
   const features = [
-    { icon: Activity, title: "Trace tree + timeline", description: "Every run rendered as a correlated trace tree and timeline. Drill from the top-level agent step down to the raw LLM and tool call.", href: incident, see: "Open a trace" },
-    { icon: GitBranch, title: "Git-linked spans", description: "Every span carries the file, line, and commit that produced it — so a failure is one click from the code that caused it.", href: incident, see: "See a git-linked span" },
+    { icon: GitBranch, title: "Git-linked spans", description: "Every span carries the file, line and commit that produced it — and the pull request that shipped that commit, the issues it closed, and open issues already describing it.", href: incident, see: "See a git-linked span" },
     { icon: Search, title: "Signal, not noise", description: "Traces are scored on error, latency, cost, retry loops and whether a failure is actionable. The ones that matter surface; the rest are sampled away.", href: "/incidents", see: "Browse incidents" },
-    { icon: Shield, title: "LLM-as-judge detectors", description: "Continuous evaluation for hallucination, tool and logic failures, intent drift, and safety violations — scored on every trace, not just the ones that already errored.", href: "/detectors", see: "See the detectors" },
-    { icon: Waypoints, title: "Trust boundaries", description: "Every span is labelled with where its bytes came from and what it can do, so untrusted content reaching an egress tool with private data in scope is a path in the trace — not a pattern in a prompt. Blocked and succeeded are both on the record.", href: "/security", see: "Open the security console" },
-    { icon: Radar, title: `${DETECTIONS.length} boundary detections`, description: `${DETECTIONS.filter((d) => !d.usesModel).length} of them never read natural language — they run on span shape, origin labels and byte provenance. Each one states what it catches, the signal it needs, and its backtest over stored traces.`, href: "/security", see: "See the detections" },
+    { icon: Waypoints, title: "Trust boundaries", description: `Every span is labelled with where its bytes came from and what it can do, so untrusted content reaching an egress tool with private data in scope is a path in the trace — not a pattern in a prompt. ${DETECTIONS.length} detections run on it, ${DETECTIONS.filter((d) => !d.usesModel).length} of them reading no natural language at all.`, href: "/security", see: "Open the security console" },
     { icon: Cpu, title: "Agentic RCA", description: "An AI agent works in a sandbox with your source: real git blame and pickaxe to find the commit that introduced the failure, explained with a counterfactual.", href: incident, see: "Read an RCA" },
-    { icon: GitBranch, title: "Commits, PRs and issues", description: "A failure is correlated not just to the commit but to the pull request that shipped it, the issues it closed, and open issues that already describe it.", href: incident, see: "See the correlation" },
     { icon: Code2, title: "Verified fix PRs", description: "Causal writes the fix and opens a pull request — diff, description, and a causal-replay check that runs your tests against the patch before claiming it's resolved.", href: incident, see: "Open a fix PR" },
     { icon: RotateCcw, title: "Counterfactual replay", description: "Re-run a failed trace against its captured snapshot with the fix applied — or with your own system-prompt append — and read the original and modified output side by side, scored for fidelity with the changed lines counted.", href: `${incident}/replay`, see: "Open the replay sandbox" },
     { icon: Zap, title: "Causal Copilot", description: "Ask any trace a question — why did this fail, what's the fix, where did the cost go. Answers grounded in your spans, RCA and git history.", href: incident, see: "Ask the Copilot" },
     { icon: Database, title: "Datasets & evals", description: "Turn a production finding into a golden case in one click, then re-run every release against it — so a fix is verified and a regression can't come back unnoticed.", href: "/evals", see: "Open the eval sets" },
     { icon: FileText, title: "Token & cost accounting", description: "Tokens and spend recorded per span and rolled up through every parent, so you can see exactly which agent step, retry, or sub-agent burned the budget.", href: "/dashboard", see: "See the rollups" },
-    { icon: Shield, title: "Bring your own model", description: "Anthropic, OpenAI, Gemini, xAI, DeepSeek, OpenRouter, Kimi, GLM or Bedrock — per workspace, per purpose. Keys are encrypted at rest and never leave your org." },
-    { icon: Webhook, title: "Built for your stack", description: "OpenTelemetry-based SDKs with adapters for LangGraph, CrewAI, LlamaIndex, OpenAI Agents, Vercel AI, and Claude Agent SDK. GitHub, Slack, and email included.", href: "#integrations", see: "See integrations" },
   ];
 
   return (
@@ -2529,22 +2313,22 @@ export default function HomePage() {
         <Nav />
         <HeroSection />
         <FailureTicker />
-        <InstallSection />
         <LandingTraceDemo />
         {/* The explorer lets you touch one trace; this walks that same trace
             through all five capabilities as real artifacts. Demonstration
             before argument. */}
         <LandingCapabilityTour />
         {/* Straight off the live explorer, which opens on the featured incident:
-            the reader has just been clicking that trace, so counting what it
-            produced and linking each artifact is a continuation rather than a
-            new claim. It also lands before the benefit sections, so those read
-            as detail on something already shown. */}
+            the reader has just been clicking that trace, so counting what the
+            product holds and linking each artifact is a continuation rather
+            than a new claim. It also lands before the benefit sections, so
+            those read as detail on something already shown. */}
         <DepthSection />
-        <StatsSection />
+        {/* Install asks for `pip install` — it only earns the ask once the
+            reader has seen a trace, a verdict and a fix PR, so it sits after
+            the demonstration rather than third on the page. */}
+        <InstallSection />
         <BenefitSections />
-        <HowItWorksSection />
-        <CausalModelStrip />
         <FeaturesSection />
         <IntegrationsSection />
         <PricingSection />

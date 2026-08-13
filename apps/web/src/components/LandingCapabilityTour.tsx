@@ -5,18 +5,22 @@
  *
  * The landing page states its argument several times and demonstrates it once.
  * This component demonstrates it five times and states nothing: every string and
- * every number below is read out of the same fixture modules the product runs on
+ * every number below is read out of the same data modules the product runs on
  * (mock-observability, mock-security, mock-evals). Nothing here is authored copy
  * about the product — it is the product's own data, rendered small.
  *
- * Four of the five panels are the SAME incident (PD-8890, the featured checkout
- * outage) walked end to end — failing span → judge verdict → root cause and fix
- * PR → the golden case that now guards it. That is the loop, on one trace, in
- * one component. The fifth panel is a security finding on a different trace and
- * says so; the security corpus has no event on the checkout trace and we do not
- * pretend otherwise.
+ * EDITORIAL LINE for anything written by hand in this file (the header, the tab
+ * hints, the per-panel captions):
+ *   - Say what the product DOES. Never claim capability it lacks, and never
+ *     follow a true claim with an enumeration of what it does not do — the
+ *     disclaimer is what makes the claim sound weak.
+ *   - Never narrate the scaffolding. No "fixture", no "demo data", no sentence
+ *     about how this section was assembled or which panels share a trace. A
+ *     visitor is not served by it.
+ *   - Internal ids (PD-8890, SEC-1059) are texture INSIDE a rendered artifact
+ *     and stay there. They do not appear in the prose that frames a section.
  *
- * Bundle: adds no new fixture module to the landing chunk. page.tsx already
+ * Bundle: adds no new data module to the landing chunk. page.tsx already
  * imports mock-evals, mock-security and mock-data, and LandingTraceDemo already
  * pulls mock-observability, so the data here is free — only this file's own JSX
  * is new. Icons reuse KIND_META from product/ui, already in the chunk.
@@ -35,23 +39,32 @@ import { KIND_META, STATUS_META, fmtDuration, fmtTokens } from "./product/ui";
 /**
  * The security finding shown in panel 03.
  *
- * SEC-1055 rather than SEC-1043 for two reasons: the landing's Benefit 03
- * section already renders SEC-1043's flow, and SEC-1055's trace is one of the
- * two the explorer has a page for (see EXPLORER_TRACES), so this panel can link
- * a security event straight into the trace view — the "two surfaces, one
- * dataset" claim, provable in a click. Swap the id here to move the panel.
+ * SEC-1059 rather than SEC-1043 because the landing's Benefit 03 section already
+ * renders SEC-1043's flow, and rather than SEC-1055 because SEC-1055 is the one
+ * event in the set made of nothing happening — its title is "no enforcement
+ * point", its outcome is "none" and it has no detection latency, so the panel
+ * rendered an audit of a gap. SEC-1059 keeps the property that earned the slot
+ * (its trace is one of the two the explorer has a page for — see
+ * EXPLORER_TRACES — so the panel can link a security event straight into the
+ * trace view, the "two surfaces, one dataset" claim provable in a click) and
+ * carries a byte-level provenance witness instead. Swap the id to move the
+ * panel; anything you swap to needs a trace in EXPLORER_TRACES to keep the
+ * second link.
  */
-const TOUR_EVENT_ID = "SEC-1055";
+const TOUR_EVENT_ID = "SEC-1059";
 
 export type TourTabKey = "observe" | "detect" | "secure" | "heal" | "improve";
 type TabKey = TourTabKey;
 
-const TABS: { key: TabKey; num: string; label: string; hint: string }[] = [
-  { key: "observe", num: "01", label: "Observe", hint: "The failing span" },
-  { key: "detect", num: "02", label: "Detect", hint: "The judge's verdict" },
-  { key: "secure", num: "03", label: "Secure", hint: "A boundary with no guard" },
-  { key: "heal", num: "04", label: "Heal", hint: "Root cause and the fix" },
-  { key: "improve", num: "05", label: "Improve", hint: "The regression test" },
+/** Tab numbers are rendered from position, not stored: a tab whose artifact is
+ *  missing is dropped from the strip entirely (see `tabs` below), and a strip
+ *  that jumps 02 → 04 tells a visitor something is broken. */
+const TABS: { key: TabKey; label: string; hint: string }[] = [
+  { key: "observe", label: "Observe", hint: "The failing span" },
+  { key: "detect", label: "Detect", hint: "The judge's verdict" },
+  { key: "secure", label: "Secure", hint: "Untrusted bytes at a capability" },
+  { key: "heal", label: "Heal", hint: "Root cause and the fix" },
+  { key: "improve", label: "Improve", hint: "The regression test" },
 ];
 
 /** Root → target ancestry, cycle-safe. The chain you would screenshot to explain a failure. */
@@ -153,7 +166,7 @@ export function LandingCapabilityTour({
   const [active, setActive] = useState<TabKey>(initialTab);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  // ── Fixture reads. getAllDemos() returns IncidentDemo, which guarantees
+  // ── Data reads. getAllDemos() returns IncidentDemo, which guarantees
   //    finding / rootCause / fixPr — no optional-chaining theatre below.
   const demo = useMemo(() => {
     const all = getAllDemos();
@@ -176,20 +189,34 @@ export function LandingCapabilityTour({
     return { dataset, item, run, result };
   }, []);
 
+  // A panel with no artifact behind it does not get a tab. The alternative —
+  // rendering "no security event resolved for SEC-1059" — puts a data-integrity
+  // message in front of a prospect, which is a worse failure than one fewer tab.
+  // observe/detect/heal read the incident demo, which is always present.
+  const tabs = useMemo(
+    () => TABS.filter((t) => (t.key === "secure" ? Boolean(event) : t.key === "improve" ? Boolean(evals) : true)),
+    [event, evals]
+  );
+
+  // `active` is state, so it can name a tab that is not on the strip (an
+  // initialTab prop, or an artifact that went away). Render from the resolved
+  // key rather than trusting it.
+  const activeKey: TabKey = tabs.some((t) => t.key === active) ? active : tabs[0]!.key;
+
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const i = TABS.findIndex((t) => t.key === active);
+      const i = tabs.findIndex((t) => t.key === activeKey);
       let next = -1;
-      if (e.key === "ArrowRight") next = (i + 1) % TABS.length;
-      else if (e.key === "ArrowLeft") next = (i - 1 + TABS.length) % TABS.length;
+      if (e.key === "ArrowRight") next = (i + 1) % tabs.length;
+      else if (e.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length;
       else if (e.key === "Home") next = 0;
-      else if (e.key === "End") next = TABS.length - 1;
+      else if (e.key === "End") next = tabs.length - 1;
       if (next < 0) return;
       e.preventDefault();
-      setActive(TABS[next]!.key);
+      setActive(tabs[next]!.key);
       tabRefs.current[next]?.focus();
     },
-    [active]
+    [activeKey, tabs]
   );
 
   // Motion is decoration, never the thing that makes content visible. Under
@@ -219,16 +246,15 @@ export function LandingCapabilityTour({
       <div className="max-w-6xl mx-auto">
         <motion.div {...reveal} className="mb-10 text-center">
           <span className="font-mono text-[11px] tracking-[0.25em] text-cyan-300/70 uppercase">
-            [ ONE FAILURE · FIVE SURFACES ]
+            [ THE FULL LOOP ]
           </span>
           <h2 className="mt-4 text-[34px] sm:text-[48px] font-light tracking-[-0.03em] text-white leading-tight">
-            The whole loop, on one incident
+            From the failing span to the test that guards it
           </h2>
           <p className="mt-3 text-[15px] text-white/55 max-w-2xl mx-auto">
-            Every panel is rendered from the fixture the product runs on. Four of them are the
-            same trace — {demo.externalId}, a checkout outage — from the span that raised to the
-            regression test that now guards it. The fifth is a security finding on a different
-            trace, and says so.
+            The span that broke, the judge&apos;s verdict on it, untrusted bytes arriving at a
+            capability, the commit behind it and the pull request that closed it, and the
+            regression test that now holds it down.
           </p>
         </motion.div>
 
@@ -239,8 +265,8 @@ export function LandingCapabilityTour({
           onKeyDown={onKeyDown}
           className="flex items-stretch gap-2 overflow-x-auto pb-2 mb-4"
         >
-          {TABS.map((t, i) => {
-            const on = t.key === active;
+          {tabs.map((t, i) => {
+            const on = t.key === activeKey;
             return (
               <button
                 key={t.key}
@@ -260,7 +286,9 @@ export function LandingCapabilityTour({
                 }`}
               >
                 <div className="flex items-center gap-2">
-                  <span className={`font-mono text-[10px] ${on ? "text-cyan-300/80" : "text-white/30"}`}>{t.num}</span>
+                  <span className={`font-mono text-[10px] ${on ? "text-cyan-300/80" : "text-white/30"}`}>
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
                   <span
                     className={`font-mono text-[11px] tracking-[0.14em] uppercase ${
                       on ? "text-white/90" : "text-white/45"
@@ -280,15 +308,15 @@ export function LandingCapabilityTour({
           <div className="px-4 sm:px-6 py-5 sm:py-6 lg:min-h-[430px]">
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
-                key={active}
+                key={activeKey}
                 role="tabpanel"
-                id={`${uid}-panel-${active}`}
-                aria-labelledby={`${uid}-tab-${active}`}
+                id={`${uid}-panel-${activeKey}`}
+                aria-labelledby={`${uid}-tab-${activeKey}`}
                 tabIndex={0}
                 className="focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-300/40 rounded"
                 {...fade}
               >
-                {active === "observe" && (
+                {activeKey === "observe" && (
                   <div>
                     <PanelHead
                       eyebrow={`${demo.externalId} · ${demo.service} · trace ${demo.traceId}`}
@@ -356,7 +384,7 @@ export function LandingCapabilityTour({
                   </div>
                 )}
 
-                {active === "detect" && (
+                {activeKey === "detect" && (
                   <div>
                     <PanelHead
                       eyebrow={`detector ${demo.finding.detector.replace(/_/g, "-")}-v1 · judge ${demo.finding.judgeModel}`}
@@ -393,91 +421,92 @@ export function LandingCapabilityTour({
                         {demo.finding.summary}
                       </p>
                     </div>
-                    <p className="mt-3 text-[12px] leading-relaxed text-white/40">
-                      An LLM judge scored the trace above and named the failure class. It labels and
-                      explains the run — it does not block it.
-                    </p>
+                    {/* No caption: the head already names the detector and the judge model,
+                        and the summary below the meters is the detector's own words. */}
                     <div className="mt-4">
                       <PanelLink href="/detectors">See every detector</PanelLink>
                     </div>
                   </div>
                 )}
 
-                {active === "secure" &&
-                  (event ? (
-                    <div>
-                      <PanelHead
-                        eyebrow={`${event.id} · rule ${event.ruleId} v${event.ruleVersion} · ${event.agent} · ${event.environment}`}
-                        title={event.title}
-                      />
-                      <div className={`${PANEL} p-1.5`}>
-                        {event.flow.map((n) => {
-                          const o = ORIGIN_SHORT[n.origin] ?? ORIGIN_SHORT.UNKNOWN!;
-                          return (
-                            <div
-                              key={n.spanId}
-                              className={`flex flex-wrap items-center gap-2 rounded px-2 py-1.5 ${
-                                n.violating ? "bg-red-500/[0.07]" : ""
-                              }`}
-                            >
-                              <Chip tone={o.tone}>{o.label}</Chip>
-                              <span className="font-mono text-[11px] sm:text-[12px] text-white/80 truncate min-w-0">
-                                {n.name}
+                {activeKey === "secure" && event && (
+                  <div>
+                    <PanelHead
+                      eyebrow={`${event.id} · rule ${event.ruleId} v${event.ruleVersion} · ${event.agent} · ${event.environment}`}
+                      title={event.title}
+                    />
+                    <div className={`${PANEL} p-1.5`}>
+                      {event.flow.map((n) => {
+                        const o = ORIGIN_SHORT[n.origin] ?? ORIGIN_SHORT.UNKNOWN!;
+                        return (
+                          <div
+                            key={n.spanId}
+                            className={`flex flex-wrap items-center gap-2 rounded px-2 py-1.5 ${
+                              n.violating ? "bg-red-500/[0.07]" : ""
+                            }`}
+                          >
+                            <Chip tone={o.tone}>{o.label}</Chip>
+                            <span className="font-mono text-[11px] sm:text-[12px] text-white/80 truncate min-w-0">
+                              {n.name}
+                            </span>
+                            {n.capability !== "NONE" && (
+                              <Chip tone={n.violating ? "text-red-300/90 border-red-400/30" : "text-white/50 border-white/[0.10]"}>
+                                {n.capability}
+                              </Chip>
+                            )}
+                            {typeof n.bytes === "number" && (
+                              <span className="ml-auto font-mono text-[11px] text-white/35 tabular-nums">
+                                {n.bytes.toLocaleString()} B
                               </span>
-                              {n.capability !== "NONE" && (
-                                <Chip tone={n.violating ? "text-red-300/90 border-red-400/30" : "text-white/50 border-white/[0.10]"}>
-                                  {n.capability}
-                                </Chip>
-                              )}
-                              {typeof n.bytes === "number" && (
-                                <span className="ml-auto font-mono text-[11px] text-white/35 tabular-nums">
-                                  {n.bytes.toLocaleString()} B
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
 
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        <div className={`${PANEL} p-3`}>
-                          <div className={LABEL}>Witness · {event.witness.kind}</div>
-                          <p className="mt-1.5 text-[12px] leading-relaxed text-white/60">{event.witness.summary}</p>
-                        </div>
-                        <div className={`${PANEL} p-3`}>
-                          <div className={LABEL}>Response</div>
-                          <p className="mt-1.5 text-[12px] leading-relaxed text-white/60">{event.response}</p>
-                        </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <div className={`${PANEL} p-3`}>
+                        <div className={LABEL}>Witness · {event.witness.kind}</div>
+                        <p className="mt-1.5 text-[12px] leading-relaxed text-white/60">{event.witness.summary}</p>
                       </div>
-
-                      <StatRow
-                        items={[
-                          { label: "priority", value: String(event.priority) },
-                          { label: "outcome", value: event.outcome },
-                          { label: "enforced", value: event.enforced ? "yes" : "no" },
-                          { label: "evidence", value: event.evidence },
-                          { label: "maps to", value: [...event.asi, ...event.owasp].join(" · ") || "—" },
-                        ]}
-                      />
-                      <p className="mt-3 text-[12px] leading-relaxed text-white/40">
-                        Causal labels the origin and capability of every hop and says when a declared
-                        boundary has no enforcement point on the path. It detects and explains
-                        crossings — it does not block them.
-                      </p>
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <PanelLink href="/security">Open the security console</PanelLink>
-                        {explorerIncidentFor(event.traceId) && (
-                          <PanelLink href={`/incidents/${explorerIncidentFor(event.traceId)}`}>
-                            Same trace, in the explorer
-                          </PanelLink>
-                        )}
+                      <div className={`${PANEL} p-3`}>
+                        <div className={LABEL}>Response</div>
+                        <p className="mt-1.5 text-[12px] leading-relaxed text-white/60">{event.response}</p>
                       </div>
                     </div>
-                  ) : (
-                    <p className="text-[13px] text-white/45">No security event resolved for {TOUR_EVENT_ID}.</p>
-                  ))}
 
-                {active === "heal" && (
+                    {/* Detection latency and evidence class, not a yes/no on enforcement:
+                        the stat that reads as a fact about the product is how fast and on
+                        what basis the crossing was found. latencyUs is optional on the
+                        type, so the row is only added when the event carries one. */}
+                    <StatRow
+                      items={[
+                        { label: "priority", value: String(event.priority) },
+                        { label: "outcome", value: event.outcome },
+                        ...(typeof event.latencyUs === "number"
+                          ? [{ label: "detected in", value: `${event.latencyUs} µs` }]
+                          : []),
+                        { label: "evidence", value: event.evidence },
+                        { label: "maps to", value: [...event.asi, ...event.owasp].join(" · ") || "—" },
+                      ]}
+                    />
+                    <p className="mt-3 text-[12px] leading-relaxed text-white/40">
+                      Every hop carries where its bytes came from and what it can do, so a crossing
+                      is a path in the trace with a byte offset at each end — not a pattern in a
+                      prompt.
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <PanelLink href="/security">Open the security console</PanelLink>
+                      {explorerIncidentFor(event.traceId) && (
+                        <PanelLink href={`/incidents/${explorerIncidentFor(event.traceId)}`}>
+                          Open this trace in the explorer
+                        </PanelLink>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {activeKey === "heal" && (
                   <div>
                     <PanelHead
                       eyebrow={`root cause · ${demo.rootCause.hopsUpstream} hops upstream · commit ${demo.rootCause.commit} · ${demo.rootCause.author}`}
@@ -555,76 +584,73 @@ export function LandingCapabilityTour({
                   </div>
                 )}
 
-                {active === "improve" &&
-                  (evals ? (
-                    <div>
-                      <PanelHead
-                        eyebrow={`${evals.dataset.name} · case ${evals.item.id} · promoted from ${evals.item.fromFinding}`}
-                        title={evals.item.title}
-                      />
-                      <div className={`${PANEL} divide-y divide-white/[0.05]`}>
-                        {evals.item.assertions.map((a) => {
-                          const res = evals.result?.assertionResults.find((r) => r.id === a.id);
-                          return (
-                            <div key={a.id} className="flex items-start gap-2.5 p-2.5">
-                              {res ? (
-                                res.passed ? (
-                                  <Check className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-emerald-400/80" />
-                                ) : (
-                                  <X className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-red-400/80" />
-                                )
+                {activeKey === "improve" && evals && (
+                  <div>
+                    <PanelHead
+                      eyebrow={`${evals.dataset.name} · case ${evals.item.id} · promoted from ${evals.item.fromFinding}`}
+                      title={evals.item.title}
+                    />
+                    <div className={`${PANEL} divide-y divide-white/[0.05]`}>
+                      {evals.item.assertions.map((a) => {
+                        const res = evals.result?.assertionResults.find((r) => r.id === a.id);
+                        return (
+                          <div key={a.id} className="flex items-start gap-2.5 p-2.5">
+                            {res ? (
+                              res.passed ? (
+                                <Check className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-emerald-400/80" />
                               ) : (
-                                <span className="w-3.5 h-3.5 flex-shrink-0" />
-                              )}
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Chip>{a.kind.replace(/_/g, " ")}</Chip>
-                                  <span className="font-mono text-[10.5px] text-white/45 break-all">{a.target}</span>
-                                </div>
-                                {res && (
-                                  <p className="mt-1 text-[12px] leading-relaxed text-white/60">{res.detail}</p>
-                                )}
+                                <X className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-red-400/80" />
+                              )
+                            ) : (
+                              <span className="w-3.5 h-3.5 flex-shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Chip>{a.kind.replace(/_/g, " ")}</Chip>
+                                <span className="font-mono text-[10.5px] text-white/45 break-all">{a.target}</span>
                               </div>
+                              {res && (
+                                <p className="mt-1 text-[12px] leading-relaxed text-white/60">{res.detail}</p>
+                              )}
                             </div>
-                          );
-                        })}
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <span className={LABEL}>By release</span>
-                        {evals.item.history.map((h) => (
-                          <span
-                            key={h.release}
-                            className={`inline-flex items-center gap-1.5 font-mono text-[10px] rounded border px-2 py-1 ${
-                              h.passed
-                                ? "text-emerald-300/85 border-emerald-400/25 bg-emerald-500/[0.05]"
-                                : "text-red-300/85 border-red-400/25 bg-red-500/[0.05]"
-                            }`}
-                          >
-                            {h.passed ? <Check className="w-2.5 h-2.5" /> : <X className="w-2.5 h-2.5" />}
-                            {h.release}
-                          </span>
-                        ))}
-                      </div>
-
-                      {evals.run && (
-                        <StatRow
-                          items={[
-                            { label: "latest run", value: `${evals.run.passed} of ${evals.run.total} passed` },
-                            { label: "release", value: evals.run.release },
-                            { label: "commit", value: evals.run.commit },
-                            { label: "judge", value: evals.run.judgeModel },
-                            { label: "assertions on this case", value: String(evals.item.assertions.length) },
-                          ]}
-                        />
-                      )}
-                      <div className="mt-4">
-                        <PanelLink href="/evals">Open the eval sets</PanelLink>
-                      </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ) : (
-                    <p className="text-[13px] text-white/45">No golden case is linked to this trace.</p>
-                  ))}
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className={LABEL}>By release</span>
+                      {evals.item.history.map((h) => (
+                        <span
+                          key={h.release}
+                          className={`inline-flex items-center gap-1.5 font-mono text-[10px] rounded border px-2 py-1 ${
+                            h.passed
+                              ? "text-emerald-300/85 border-emerald-400/25 bg-emerald-500/[0.05]"
+                              : "text-red-300/85 border-red-400/25 bg-red-500/[0.05]"
+                          }`}
+                        >
+                          {h.passed ? <Check className="w-2.5 h-2.5" /> : <X className="w-2.5 h-2.5" />}
+                          {h.release}
+                        </span>
+                      ))}
+                    </div>
+
+                    {evals.run && (
+                      <StatRow
+                        items={[
+                          { label: "latest run", value: `${evals.run.passed} of ${evals.run.total} passed` },
+                          { label: "release", value: evals.run.release },
+                          { label: "commit", value: evals.run.commit },
+                          { label: "judge", value: evals.run.judgeModel },
+                          { label: "assertions on this case", value: String(evals.item.assertions.length) },
+                        ]}
+                      />
+                    )}
+                    <div className="mt-4">
+                      <PanelLink href="/evals">Open the eval sets</PanelLink>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             </AnimatePresence>
           </div>
